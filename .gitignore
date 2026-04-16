@@ -6,3 +6,6 @@ __pycache__/
 .ipynb_checkpoints/
 data/benchmarks/*.csv    # lab data — don't commit
 *.log
+outputs/*.csv
+outputs/*.tsv
+outputs/*.xlsx
