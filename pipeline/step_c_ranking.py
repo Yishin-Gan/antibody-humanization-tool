@@ -226,7 +226,7 @@ if __name__ == "__main__":
         top_n_vh=5,
         top_n_vl=5,
         export_csv=True,
-        csv_path="/home/claude/candidates.csv",
+        csv_path="/workspace/antibody-humanization-tool/outputs/candidates.csv",
     )
 
     print()
