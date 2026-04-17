@@ -4,7 +4,7 @@ __pycache__/
 .env
 *.egg-info/
 .ipynb_checkpoints/
-data/benchmarks/*.csv    # lab data — don't commit
+data/benchmarks/*.csv
 *.log
 outputs/*.csv
 outputs/*.tsv
