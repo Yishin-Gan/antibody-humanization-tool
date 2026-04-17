@@ -9,3 +9,5 @@ data/benchmarks/*.csv    # lab data — don't commit
 outputs/*.csv
 outputs/*.tsv
 outputs/*.xlsx
+*.gz
+*.db
