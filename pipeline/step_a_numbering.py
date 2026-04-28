@@ -23,7 +23,8 @@ ALL_CDR_POSITIONS = set().union(
     *(v for k, v in IMGT_REGIONS.items() if k.startswith("CDR")))
 
 
-def number_sequence(sequence: str, chain_type: str = None) -> dict:
+def number_sequence(sequence: str, chain_type: str = None,
+                    cdr_definition: str = "imgt") -> dict:
     """
     Number a raw antibody sequence with ANARCI under the IMGT scheme
     and split residues into framework (FR) and CDR dictionaries.

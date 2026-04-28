@@ -4,9 +4,11 @@ Returns a ranked list of top-N candidate germlines by framework identity.
 
 Depends on: step_a_numbering.py (for number_sequence and IMGT_REGIONS)
 """
-
+import sys
+from pathlib import Path
+sys.path.insert(0, "/workspace/antibody-humanization-tool")  # noqa: E402
 from anarci.germlines import all_germlines
-from step_a_numbering import IMGT_REGIONS, ALL_FR_POSITIONS
+from pipeline.step_a_numbering import IMGT_REGIONS, ALL_FR_POSITIONS
 
 
 # ── Load and parse germline database ─────────────────────────────────────────
@@ -191,17 +193,15 @@ def print_rankings(rankings: list[dict], chain_label: str = "") -> None:
 
 # ── Smoke test ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, "/home/claude")
+    # import sys
+    # sys.path.insert(0, "/home/claude")
     from step_a_numbering import number_sequence
 
     test_vh = (
-        "EVQLVESGGGLVQPGGSLRLSCAASGFNIKDTYIHWVRQAPGKGLEWVARIYPTNGYTRYADSVKGRFT"
-        "ISADTSKNTAYLQMNSLRAEDTAVYYCSRWGGDGFYAMDYWGQGTLVTVSS"
+        "EVQLQQSGADLVKPGASVKLSCKASGYTFTENTIHWVKQRSGQGLEWIGWFYPGSGSINYNEKFKDKATLTADKSSSTVYMELSRLTSEDSAVYFCARHGFYYGNYVPFDYWGQGTTLTVSS"
     )
     test_vl = (
-        "DIQMTQSPSSLSASVGDRVTITCKASQDVGTSVAWYQQKPGKAPKLLIYSASYRYTGVPSRFSGSGSGT"
-        "DFTLTISSLQPEDFATYYCQQYYTYPPTFGQGTKVEIK"
+        "DIQMTQTTSSLSASLGDRVTITCSASQGISNYLNWYQQKPDGTVKLLIYYTSILHSGVPSRFSGSGSGTDYSLTISNLEPEDIATYYCQQYSKLPYTFGGGTKLELKR"
     )
 
     print("Running Sub-step A...")
