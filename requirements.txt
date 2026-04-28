@@ -1,3 +1,4 @@
 anarci
+abnumber
 biophi
 # hmmer must be installed at OS level — see README
