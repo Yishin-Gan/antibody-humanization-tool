@@ -6,7 +6,7 @@ Depends on: step_a_numbering.py (for number_sequence and IMGT_REGIONS)
 """
 
 from anarci.germlines import all_germlines
-from step_a_numbering import IMGT_REGIONS, ALL_FR_POSITIONS
+from pipeline.step_a_numbering import IMGT_REGIONS, ALL_FR_POSITIONS
 
 
 # ── Load and parse germline database ─────────────────────────────────────────
@@ -412,7 +412,7 @@ def print_normalization_report(rankings: list[dict], chain_type: str) -> None:
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, "/home/claude")
-    from step_a_numbering import number_sequence
+    from pipeline.step_a_numbering import number_sequence
 
     test_vh = (
         "EVQLVESGGGLVQPGGSLRLSCAASGFNIKDTYIHWVRQAPGKGLEWVARIYPTNGYTRYADSVKGRFT"

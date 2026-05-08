@@ -70,6 +70,11 @@ class CloneSequences:
     vh_8_stated_germline_grafted:       Optional[str] = None
     vh_9_stated_germline_humanized:     Optional[str] = None
 
+    # VH Sapiens raw output (before CDR restoration) — for comparison with CDR-restored versions
+    vh_2_pipeline_humanized_raw:        Optional[str] = None
+    vh_6_detected_humanized_raw:        Optional[str] = None
+    vh_9_stated_germline_humanized_raw: Optional[str] = None
+
     # VL sequences
     vl_1_pipeline_grafted:              Optional[str] = None
     vl_2_pipeline_humanized:            Optional[str] = None
@@ -81,6 +86,11 @@ class CloneSequences:
     vl_8_stated_germline_grafted:       Optional[str] = None
     vl_9_stated_germline_humanized:     Optional[str] = None
 
+    # VL Sapiens raw output (before CDR restoration)
+    vl_2_pipeline_humanized_raw:        Optional[str] = None
+    vl_6_detected_humanized_raw:        Optional[str] = None
+    vl_9_stated_germline_humanized_raw: Optional[str] = None
+
     # Metadata
     vh_pipeline_germline:  Optional[str] = None
     vl_pipeline_germline:  Optional[str] = None
@@ -89,34 +99,142 @@ class CloneSequences:
     vh_stated_germline:    Optional[str] = None  # from CSV vh_germline column
     vl_stated_germline:    Optional[str] = None  # from CSV vl_germline column
     vl_chain_type:         Optional[str] = None
+    # CDR definition selected per sequence group (imgt/kabat/chothia)
+    vh_cdr_def_pipeline:   Optional[str] = None  # used for seqs 1, 2
+    vl_cdr_def_pipeline:   Optional[str] = None
+    vh_cdr_def_detected:   Optional[str] = None  # used for seqs 4, 6, 7
+    vl_cdr_def_detected:   Optional[str] = None
+    vh_cdr_def_stated:     Optional[str] = None  # used for seqs 8, 9
+    vl_cdr_def_stated:     Optional[str] = None
     error:                 Optional[str] = None
+
+
+# ── CDR definition selection ─────────────────────────────────────────────────
+
+def select_cdr_definition(mouse_seq: str, germline_name: str,
+                          chain_type: str, scheme: str = "imgt") -> str:
+    """
+    Select the CDR definition (imgt/kabat/chothia) that produces the longest
+    total CDR length when grafting mouse_seq onto germline_name.
+
+    This mirrors the lab's strategy of choosing whichever numbering scheme
+    preserves the most CDR residues, minimizing the risk of truncating
+    important CDR loop residues during humanization.
+
+    Returns the name of the selected definition.
+    """
+    best_def = "kabat"  # fallback default
+    max_cdr_len = -1
+
+    for cdr_def in ["imgt", "kabat", "chothia"]:
+        try:
+            normalized = normalize_germline_name(germline_name)
+            mouse_chain = Chain(mouse_seq, scheme=scheme,
+                                cdr_definition=cdr_def)
+            grafted = mouse_chain.graft_cdrs_onto_human_germline(
+                v_gene=normalized, backmutate_vernier=False)
+
+            # Count CDR residues using abnumber's built-in CDR dicts
+            # These reflect the chosen cdr_definition's boundaries
+            cdr_len = sum(
+                1 for pos, aa in mouse_chain
+                if (mouse_chain.cdr1_dict and pos in mouse_chain.cdr1_dict) or
+                   (mouse_chain.cdr2_dict and pos in mouse_chain.cdr2_dict) or
+                   (mouse_chain.cdr3_dict and pos in mouse_chain.cdr3_dict)
+            )
+
+            if cdr_len > max_cdr_len:
+                max_cdr_len = cdr_len
+                best_def = cdr_def
+
+        except Exception:
+            continue
+
+    return best_def
 
 
 # ── Core grafting helper ──────────────────────────────────────────────────────
 
 def graft(mouse_seq: str, germline_name: str,
-          scheme: str = "imgt", cdr_definition: str = "kabat") -> Optional[str]:
-    """Graft mouse CDRs onto a human germline. Returns grafted sequence or None."""
+          scheme: str = "imgt", cdr_definition: str = None,
+          chain_type: str = None) -> tuple[Optional[str], str]:
+    """
+    Graft mouse CDRs onto a human germline.
+    If cdr_definition is None, selects the definition producing the longest CDRs.
+    chain_type ('H', 'K', 'L') must be provided to avoid auto-detection errors.
+    Returns (grafted_sequence, cdr_definition_used).
+    """
     try:
         normalized = normalize_germline_name(germline_name)
+
+        # Resolve chain type if not provided
+        if chain_type is None:
+            try:
+                from pipeline.step_a_numbering import number_sequence
+                num = number_sequence(mouse_seq, chain_type=None)
+                chain_type = num["chain_type"]
+            except Exception:
+                chain_type = "H"
+
+        if cdr_definition is None:
+            cdr_definition = select_cdr_definition(
+                mouse_seq, germline_name, chain_type, scheme)
+
         mouse_chain = Chain(mouse_seq, scheme=scheme,
                             cdr_definition=cdr_definition)
         grafted = mouse_chain.graft_cdrs_onto_human_germline(
             v_gene=normalized, backmutate_vernier=False)
-        return grafted.seq
+        return grafted.seq, cdr_definition
+
     except Exception as e:
         print(f"    Grafting failed for {germline_name}: {e}")
-        return None
+        return None, cdr_definition or "unknown"
+
+
+# ── Position map helpers ─────────────────────────────────────────────────────
+
+def _sort_key(pos):
+    """Sort key that handles both int positions and tuple (int, str) insertion positions."""
+    if isinstance(pos, tuple):
+        return (pos[0], pos[1])  # e.g. (111, 'A') sorts after (111, ' ')
+    return (pos, ' ')            # int positions sort before their insertions
+
+
+def _build_position_map(numbered: dict) -> dict:
+    """
+    Build a complete {position: aa} map including CDR3 insertion positions.
+    Includes ALL positions — both integer IMGT positions and tuple insertion positions.
+    """
+    result = dict(numbered["fr_residues"])
+    result.update(numbered["cdr_residues"])  # includes tuple-keyed insertions
+    return result
+
+
+def _reconstruct_sequence(pos_map: dict) -> str:
+    """
+    Reconstruct sequence from position map in correct IMGT order.
+    Handles both integer positions and tuple CDR3 insertion positions.
+    """
+    return "".join(
+        pos_map[pos]
+        for pos in sorted(pos_map.keys(), key=_sort_key)
+        if pos_map.get(pos)
+    )
 
 
 # ── Sapiens humanization helper ───────────────────────────────────────────────
 
-def humanize_sapiens(grafted_seq: str, chain_type: str) -> Optional[str]:
+def humanize_sapiens(grafted_seq: str, chain_type: str) -> tuple[Optional[str], Optional[str]]:
     """
     Apply Sapiens humanization to a grafted sequence.
     Sapiens scores every position independently — including CDRs.
     After humanization, CDR positions are restored from the input sequence
     so that only FR positions are modified.
+
+    Returns:
+        (cdr_restored_seq, raw_sapiens_seq)
+        cdr_restored_seq: FRs humanized by Sapiens, CDRs preserved from grafted input
+        raw_sapiens_seq:  full Sapiens output before CDR restoration (for comparison)
 
     predict_scores(seq, chain_type) returns a DataFrame — take idxmax per row.
     Requires biophi: pip install biophi
@@ -130,59 +248,60 @@ def humanize_sapiens(grafted_seq: str, chain_type: str) -> Optional[str]:
 
         if len(sapiens_seq) != len(grafted_seq):
             print(f"    Sapiens length mismatch — returning original")
-            return grafted_seq
+            return grafted_seq, sapiens_seq
 
-        # Number both sequences to identify CDR positions
+        # Number the grafted sequence to identify which STRING INDICES are CDR
+        # We do NOT number the Sapiens output — Sapiens may reassign insertion
+        # positions differently, causing residue swaps at CDR3 insertions.
+        # Instead we identify CDR string positions directly from the grafted seq.
         grafted_num = number_sequence(grafted_seq, chain_type=chain_type)
-        sapiens_num = number_sequence(sapiens_seq, chain_type=chain_type)
 
-        # Get all CDR positions from the grafted sequence
-        cdr_positions = set()
-        for pos_key in grafted_num["cdr_residues"]:
-            if isinstance(pos_key, int):
-                cdr_positions.add(pos_key)
+        # Map IMGT positions to string indices in grafted_seq
+        # Build ordered list of (imgt_pos, string_index, aa) for all positions
+        grafted_all = _build_position_map(grafted_num)
+        ordered_positions = sorted(grafted_all.keys(), key=_sort_key)
 
-        # Build position → residue map for the Sapiens sequence
-        # then overwrite CDR positions with original grafted residues
-        grafted_all = {
-            **grafted_num["fr_residues"],
-            **{k: v for k, v in grafted_num["cdr_residues"].items()
-               if isinstance(k, int)}
-        }
-        sapiens_all = {
-            **sapiens_num["fr_residues"],
-            **{k: v for k, v in sapiens_num["cdr_residues"].items()
-               if isinstance(k, int)}
-        }
+        # Identify which string indices correspond to CDR positions
+        cdr_string_indices = set()
+        for str_idx, pos in enumerate(ordered_positions):
+            if pos in grafted_num["cdr_residues"]:
+                cdr_string_indices.add(str_idx)
 
-        # Restore CDR positions from grafted sequence
-        for pos in cdr_positions:
-            if pos in grafted_all:
-                sapiens_all[pos] = grafted_all[pos]
+        # Restore CDR positions in Sapiens output at string level
+        # This avoids any IMGT renumbering issues with CDR3 insertions
+        sapiens_list = list(sapiens_seq)
+        grafted_list = list(grafted_seq)
 
-        # Reconstruct sequence in position order
-        result_seq = "".join(
-            sapiens_all[pos]
-            for pos in sorted(sapiens_all.keys())
-            if sapiens_all.get(pos)
-        )
+        for str_idx in cdr_string_indices:
+            if str_idx < len(sapiens_list) and str_idx < len(grafted_list):
+                sapiens_list[str_idx] = grafted_list[str_idx]
 
-        # Count FR changes made by Sapiens
+        cdr_restored_seq = "".join(sapiens_list)
+
+        # Count changes at string level
+        fr_string_indices = set(range(len(grafted_list))) - cdr_string_indices
         fr_changes = sum(
-            1 for pos in grafted_num["fr_residues"]
-            if grafted_all.get(pos) != sapiens_all.get(pos)
+            1 for i in fr_string_indices
+            if i < len(grafted_list) and i < len(sapiens_list)
+            # compare against raw Sapiens
+            and grafted_list[i] != sapiens_seq[i]
         )
-        print(
-            f"    Sapiens: {fr_changes} FR position(s) humanized, CDRs preserved")
+        cdr_changes_by_sapiens = sum(
+            1 for i in cdr_string_indices
+            if i < len(grafted_list) and i < len(sapiens_seq)
+            and grafted_list[i] != sapiens_seq[i]
+        )
+        print(f"    Sapiens: {fr_changes} FR position(s) humanized, "
+              f"{cdr_changes_by_sapiens} CDR position(s) restored")
 
-        return result_seq
+        return cdr_restored_seq, sapiens_seq
 
     except ImportError:
         print("    Sapiens not available — install biophi: pip install biophi")
-        return None
+        return None, None
     except Exception as e:
         print(f"    Sapiens humanization failed: {e}")
-        return None
+        return None, None
 
 
 # ── Direct back-mutation helper ───────────────────────────────────────────────
@@ -213,20 +332,24 @@ def apply_direct_backmutations(
         print(f"    Found {len(backmut_positions)} back-mutation positions: "
               f"{sorted(backmut_positions.keys())}")
 
-        base_fr = dict(numbered_base["fr_residues"])
-        base_cdr = {k: v for k, v in numbered_base["cdr_residues"].items()
-                    if isinstance(k, int)}
+        # Apply back-mutations at string level to preserve CDR3 insertion order
+        # Using IMGT position→string index mapping from base sequence
+        base_all = _build_position_map(numbered_base)
+        ordered_pos = sorted(base_all.keys(), key=_sort_key)
 
-        for pos, aa in backmut_positions.items():
-            if pos in base_fr:
-                base_fr[pos] = aa
+        # Build string-level mutation map: string_index → new_aa
+        str_mutations = {}
+        for imgt_pos, new_aa in backmut_positions.items():
+            if imgt_pos in base_all:
+                str_idx = ordered_pos.index(imgt_pos)
+                str_mutations[str_idx] = new_aa
 
-        all_residues = {**base_fr, **base_cdr}
-        return "".join(
-            all_residues[pos]
-            for pos in sorted(all_residues.keys())
-            if all_residues.get(pos)
-        )
+        result_list = list(base_seq)
+        for str_idx, new_aa in str_mutations.items():
+            if str_idx < len(result_list):
+                result_list[str_idx] = new_aa
+
+        return "".join(result_list)
     except Exception as e:
         print(f"    Direct back-mutation failed: {e}")
         return None
@@ -302,20 +425,23 @@ def generate_sequences(
             print(f"    Lab-stated VL germline: {stated_vl_germ}")
 
         # ── Sequence 1: pipeline grafted ──────────────────────────────────────
-        print(f"    Generating seq 1 (pipeline grafted)...")
-        result.vh_1_pipeline_grafted = graft(
-            mouse_vh, pipe_vh_germ, cdr_definition=cdr_definition)
-        result.vl_1_pipeline_grafted = graft(
-            mouse_vl, pipe_vl_germ, cdr_definition=cdr_definition)
+        print(
+            f"    Generating seq 1 (pipeline grafted — selecting longest CDR definition)...")
+        result.vh_1_pipeline_grafted, result.vh_cdr_def_pipeline = graft(
+            mouse_vh, pipe_vh_germ, chain_type="H")
+        result.vl_1_pipeline_grafted, result.vl_cdr_def_pipeline = graft(
+            mouse_vl, pipe_vl_germ, chain_type=vl_chain_type)
+        print(f"    VH CDR definition selected: {result.vh_cdr_def_pipeline}")
+        print(f"    VL CDR definition selected: {result.vl_cdr_def_pipeline}")
 
         # ── Sequence 2: pipeline humanized (Sapiens) ──────────────────────────
         print(f"    Generating seq 2 (pipeline humanized via Sapiens)...")
         if result.vh_1_pipeline_grafted:
-            result.vh_2_pipeline_humanized = humanize_sapiens(
-                result.vh_1_pipeline_grafted, "H")
+            result.vh_2_pipeline_humanized, result.vh_2_pipeline_humanized_raw = (
+                humanize_sapiens(result.vh_1_pipeline_grafted, "H"))
         if result.vl_1_pipeline_grafted:
-            result.vl_2_pipeline_humanized = humanize_sapiens(
-                result.vl_1_pipeline_grafted, vl_chain_type)
+            result.vl_2_pipeline_humanized, result.vl_2_pipeline_humanized_raw = (
+                humanize_sapiens(result.vl_1_pipeline_grafted, vl_chain_type))
 
         # ── Sequence 3: lab grafted (from CSV — ground truth) ─────────────────
         print(f"    Setting seq 3 (lab grafted — from CSV)...")
@@ -323,13 +449,17 @@ def generate_sequences(
         result.vl_3_lab_grafted = lab_hu_vl
 
         # ── Sequence 4: detected germline grafted ─────────────────────────────
-        print(f"    Generating seq 4 (detected germline grafted)...")
+        print(f"    Generating seq 4 (detected germline grafted — selecting longest CDR definition)...")
         if det_vh_germ:
-            result.vh_4_detected_grafted = graft(
-                mouse_vh, det_vh_germ, cdr_definition=cdr_definition)
+            result.vh_4_detected_grafted, result.vh_cdr_def_detected = graft(
+                mouse_vh, det_vh_germ, chain_type="H")
+            print(
+                f"    VH CDR definition selected: {result.vh_cdr_def_detected}")
         if det_vl_germ:
-            result.vl_4_detected_grafted = graft(
-                mouse_vl, det_vl_germ, cdr_definition=cdr_definition)
+            result.vl_4_detected_grafted, result.vl_cdr_def_detected = graft(
+                mouse_vl, det_vl_germ, chain_type=vl_chain_type)
+            print(
+                f"    VL CDR definition selected: {result.vl_cdr_def_detected}")
 
         # ── Sequence 5: lab final (from CSV — ground truth) ───────────────────
         print(f"    Setting seq 5 (lab final — from CSV)...")
@@ -339,11 +469,11 @@ def generate_sequences(
         # ── Sequence 6: detected germline + Sapiens ───────────────────────────
         print(f"    Generating seq 6 (detected germline + Sapiens)...")
         if result.vh_4_detected_grafted:
-            result.vh_6_detected_humanized = humanize_sapiens(
-                result.vh_4_detected_grafted, "H")
+            result.vh_6_detected_humanized, result.vh_6_detected_humanized_raw = (
+                humanize_sapiens(result.vh_4_detected_grafted, "H"))
         if result.vl_4_detected_grafted:
-            result.vl_6_detected_humanized = humanize_sapiens(
-                result.vl_4_detected_grafted, vl_chain_type)
+            result.vl_6_detected_humanized, result.vl_6_detected_humanized_raw = (
+                humanize_sapiens(result.vl_4_detected_grafted, vl_chain_type))
 
         # ── Sequence 7: detected germline + direct back-mutations ─────────────
         print(f"    Generating seq 7 (detected germline + direct back-mutations)...")
@@ -358,26 +488,30 @@ def generate_sequences(
 
         # ── Sequence 8: lab-stated germline grafted (from database) ───────────
         # Uses the germline sequence from the ANARCI database, not the actual input
-        print(f"    Generating seq 8 (lab-stated germline grafted)...")
+        print(f"    Generating seq 8 (lab-stated germline grafted — selecting longest CDR definition)...")
         if stated_vh_germ:
-            result.vh_8_stated_germline_grafted = graft(
-                mouse_vh, stated_vh_germ, cdr_definition=cdr_definition)
+            result.vh_8_stated_germline_grafted, result.vh_cdr_def_stated = graft(
+                mouse_vh, stated_vh_germ, chain_type="H")
+            print(
+                f"    VH CDR definition selected: {result.vh_cdr_def_stated}")
         else:
             print(f"    Skipping seq 8 VH — no lab-stated germline in CSV")
         if stated_vl_germ:
-            result.vl_8_stated_germline_grafted = graft(
-                mouse_vl, stated_vl_germ, cdr_definition=cdr_definition)
+            result.vl_8_stated_germline_grafted, result.vl_cdr_def_stated = graft(
+                mouse_vl, stated_vl_germ, chain_type=vl_chain_type)
+            print(
+                f"    VL CDR definition selected: {result.vl_cdr_def_stated}")
         else:
             print(f"    Skipping seq 8 VL — no lab-stated germline in CSV")
 
         # ── Sequence 9: lab-stated germline + Sapiens ─────────────────────────
         print(f"    Generating seq 9 (lab-stated germline + Sapiens)...")
         if result.vh_8_stated_germline_grafted:
-            result.vh_9_stated_germline_humanized = humanize_sapiens(
-                result.vh_8_stated_germline_grafted, "H")
+            result.vh_9_stated_germline_humanized, result.vh_9_stated_germline_humanized_raw = (
+                humanize_sapiens(result.vh_8_stated_germline_grafted, "H"))
         if result.vl_8_stated_germline_grafted:
-            result.vl_9_stated_germline_humanized = humanize_sapiens(
-                result.vl_8_stated_germline_grafted, vl_chain_type)
+            result.vl_9_stated_germline_humanized, result.vl_9_stated_germline_humanized_raw = (
+                humanize_sapiens(result.vl_8_stated_germline_grafted, vl_chain_type))
 
     except Exception as e:
         result.error = str(e)
@@ -397,7 +531,24 @@ SEQ_LABELS = {
     "7": "detected_direct_backmut",
     "8": "stated_germline_grafted",
     "9": "stated_germline_humanized",
+    # Raw Sapiens output before CDR restoration — for comparison with CDR-restored versions
+    "2r": "pipeline_humanized_raw",
+    "6r": "detected_humanized_raw",
+    "9r": "stated_germline_humanized_raw",
 }
+
+
+def _get_seq(seqs: CloneSequences, num: str, label: str, chain: str) -> Optional[str]:
+    """Get sequence from CloneSequences handling the raw (r-suffixed) seq IDs.
+
+    Raw sequences (2r, 6r, 9r) strip the 'r' from the num when building the
+    field name since the field is e.g. vh_2_pipeline_humanized_raw not vh_2r_...
+    """
+    # Strip trailing 'r' from num — the field uses base num + full label
+    # e.g. num="2r", label="pipeline_humanized_raw" → field="vh_2_pipeline_humanized_raw"
+    base_num = num.rstrip("r") if num.endswith("r") else num
+    field = f"{chain}_{base_num}_{label}"
+    return getattr(seqs, field, None)
 
 
 def print_sequences(seqs: CloneSequences) -> None:
@@ -408,8 +559,8 @@ def print_sequences(seqs: CloneSequences) -> None:
     print(f"  {'Seq':<4} {'Label':<30} {'VH length':>10} {'VL length':>10}")
     print(f"  {'-'*4} {'-'*30} {'-'*10} {'-'*10}")
     for num, label in SEQ_LABELS.items():
-        vh = getattr(seqs, f"vh_{num}_{label}", None)
-        vl = getattr(seqs, f"vl_{num}_{label}", None)
+        vh = _get_seq(seqs, num, label, "vh")
+        vl = _get_seq(seqs, num, label, "vl")
         print(f"  {num:<4} {label:<30} {str(len(vh) if vh else 'N/A'):>10} "
               f"{str(len(vl) if vl else 'N/A'):>10}")
 
@@ -420,21 +571,40 @@ def export_sequences(all_seqs: list, output_path: str) -> None:
         if seqs.error:
             continue
         for num, label in SEQ_LABELS.items():
-            vh = getattr(seqs, f"vh_{num}_{label}", None)
-            vl = getattr(seqs, f"vl_{num}_{label}", None)
+            vh = _get_seq(seqs, num, label, "vh")
+            vl = _get_seq(seqs, num, label, "vl")
+            # Determine which CDR definition was used for this sequence group
+            cdr_def_map = {
+                "1": (seqs.vh_cdr_def_pipeline, seqs.vl_cdr_def_pipeline),
+                "2": (seqs.vh_cdr_def_pipeline, seqs.vl_cdr_def_pipeline),
+                "2r": (seqs.vh_cdr_def_pipeline, seqs.vl_cdr_def_pipeline),
+                "3": (None, None),  # direct from CSV
+                "4": (seqs.vh_cdr_def_detected, seqs.vl_cdr_def_detected),
+                "5": (None, None),  # direct from CSV
+                "6": (seqs.vh_cdr_def_detected, seqs.vl_cdr_def_detected),
+                "6r": (seqs.vh_cdr_def_detected, seqs.vl_cdr_def_detected),
+                "7": (seqs.vh_cdr_def_detected, seqs.vl_cdr_def_detected),
+                "8": (seqs.vh_cdr_def_stated, seqs.vl_cdr_def_stated),
+                "9": (seqs.vh_cdr_def_stated, seqs.vl_cdr_def_stated),
+                "9r": (seqs.vh_cdr_def_stated, seqs.vl_cdr_def_stated),
+            }
+            vh_cdr_def, vl_cdr_def = cdr_def_map.get(num, (None, None))
+
             rows.append({
-                "clone":           seqs.clone_id,
-                "seq_id":          num,
-                "seq_label":       label,
-                "vh_sequence":     vh or "",
-                "vl_sequence":     vl or "",
-                "vh_germline":     seqs.vh_pipeline_germline or "",
-                "vl_germline":     seqs.vl_pipeline_germline or "",
-                "vh_det_germline": seqs.vh_detected_germline or "",
-                "vl_det_germline": seqs.vl_detected_germline or "",
+                "clone":              seqs.clone_id,
+                "seq_id":             num,
+                "seq_label":          label,
+                "vh_sequence":        vh or "",
+                "vl_sequence":        vl or "",
+                "vh_germline":        seqs.vh_pipeline_germline or "",
+                "vl_germline":        seqs.vl_pipeline_germline or "",
+                "vh_det_germline":    seqs.vh_detected_germline or "",
+                "vl_det_germline":    seqs.vl_detected_germline or "",
                 "vh_stated_germline": seqs.vh_stated_germline or "",
                 "vl_stated_germline": seqs.vl_stated_germline or "",
-                "vl_chain_type":   seqs.vl_chain_type or "",
+                "vl_chain_type":      seqs.vl_chain_type or "",
+                "vh_cdr_def":         vh_cdr_def or "",
+                "vl_cdr_def":         vl_cdr_def or "",
             })
 
     if not rows:

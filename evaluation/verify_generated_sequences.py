@@ -41,21 +41,27 @@ _boundary_cache: dict = {}
 
 
 def compute_boundary_positions(
-    mouse_seq: str, germline_name: str, chain_type: str
+    mouse_seq: str, germline_name: str, chain_type: str,
+    selected_def: str = "kabat"
 ) -> set:
     """
-    Compute boundary positions where Kabat and IMGT CDR definitions disagree
+    Compute boundary positions where the selected CDR definition and IMGT disagree
     for a specific mouse sequence and germline combination.
 
-    Grafts the mouse sequence using both Kabat and IMGT, then finds positions
-    where the two grafted sequences differ. These are the boundary positions
-    that should be excluded from CDR preservation checks.
+    In Approach 2 (longest-CDR strategy), selected_def is the definition that was
+    actually used for grafting — read from the vh_cdr_def/vl_cdr_def CSV columns.
+    If selected_def == 'imgt', no boundaries exist (same definition used both sides).
 
     Results are cached to avoid redundant computation across sequences.
     """
-    cache_key = (mouse_seq, germline_name, chain_type)
+    cache_key = (mouse_seq, germline_name, chain_type, selected_def)
     if cache_key in _boundary_cache:
         return _boundary_cache[cache_key]
+
+    # If grafting used IMGT (same as verification), no boundary disagreements
+    if selected_def == "imgt":
+        _boundary_cache[cache_key] = set()
+        return set()
 
     try:
         from abnumber import Chain
@@ -63,20 +69,21 @@ def compute_boundary_positions(
 
         normalized = normalize_germline_name(germline_name)
 
-        kabat_chain = Chain(mouse_seq, scheme="imgt", cdr_definition="kabat")
+        selected_chain = Chain(mouse_seq, scheme="imgt",
+                               cdr_definition=selected_def)
         imgt_chain = Chain(mouse_seq, scheme="imgt", cdr_definition="imgt")
 
-        seq_kabat = kabat_chain.graft_cdrs_onto_human_germline(
+        seq_selected = selected_chain.graft_cdrs_onto_human_germline(
             normalized, backmutate_vernier=False).seq
         seq_imgt = imgt_chain.graft_cdrs_onto_human_germline(
             normalized, backmutate_vernier=False).seq
 
-        num_kabat = number_sequence(seq_kabat, chain_type=chain_type)
-        num_imgt = number_sequence(seq_imgt,  chain_type=chain_type)
+        num_selected = number_sequence(seq_selected, chain_type=chain_type)
+        num_imgt = number_sequence(seq_imgt,     chain_type=chain_type)
 
-        all_kabat = {
-            **num_kabat["fr_residues"],
-            **{k: v for k, v in num_kabat["cdr_residues"].items() if isinstance(k, int)}
+        all_selected = {
+            **num_selected["fr_residues"],
+            **{k: v for k, v in num_selected["cdr_residues"].items() if isinstance(k, int)}
         }
         all_imgt = {
             **num_imgt["fr_residues"],
@@ -84,8 +91,8 @@ def compute_boundary_positions(
         }
 
         boundary = {
-            pos for pos in set(all_kabat) | set(all_imgt)
-            if all_kabat.get(pos) != all_imgt.get(pos)
+            pos for pos in set(all_selected) | set(all_imgt)
+            if all_selected.get(pos) != all_imgt.get(pos)
         }
 
         _boundary_cache[cache_key] = boundary
@@ -126,12 +133,20 @@ def get_fr_flat(sequence: str, chain_type: str) -> Optional[dict]:
         return None
 
 
+# Positions where ANARCI renumbering can shift residue assignments
+# after Sapiens humanization — gap-adjacent positions in CDR2 and CDR3
+# These are excluded regardless of germline or CDR definition
+ANARCI_RENUMBER_EXCLUSIONS_VH = {62, 63, 64, 65, 110, 111, 112, 113}
+ANARCI_RENUMBER_EXCLUSIONS_VL = {55, 56, 104, 105}
+
+
 def cdrs_identical(seq_a: str, seq_b: str, chain_type: str,
                    boundary: set = None) -> tuple[bool, list]:
     """
     Check if two sequences have identical CDRs.
-    Excludes boundary positions where Kabat and IMGT definitions disagree —
-    these are computed dynamically per clone/germline via compute_boundary_positions().
+    Excludes:
+    1. Boundary positions computed dynamically per germline (Kabat/IMGT disagreements)
+    2. Gap-adjacent positions where ANARCI renumbering can shift after Sapiens
     Returns (match, list of diffs).
     """
     cdrs_a = get_cdrs(seq_a, chain_type)
@@ -140,6 +155,11 @@ def cdrs_identical(seq_a: str, seq_b: str, chain_type: str,
         return False, ["numbering failed"]
 
     boundary = boundary or set()
+    # Add ANARCI renumbering exclusions for this chain type
+    if chain_type == "H":
+        boundary = boundary | ANARCI_RENUMBER_EXCLUSIONS_VH
+    else:
+        boundary = boundary | ANARCI_RENUMBER_EXCLUSIONS_VL
     diffs = []
     for region in ["CDR1", "CDR2", "CDR3"]:
         ra = cdrs_a.get(region, {})
@@ -293,14 +313,21 @@ def verify_clone(clone_id: str, seqs: dict, benchmark: dict,
             check("5", chain, "== CSV final sequence", passed,
                   "" if passed else "sequence mismatch with CSV")
 
-        # ── Compute dynamic boundary positions per germline ─────────────────
-        # Each germline may produce different Kabat/IMGT boundary disagreements
+        # ── Compute dynamic boundary positions per germline and CDR definition ──
+        # Read the CDR definition that was actually used for each sequence group
+        chain_key = "vh" if chain_type == "H" else "vl"
+        cdr_def_pipe = seqs.get("1",  {}).get(
+            f"{chain_key}_cdr_def") or "kabat"
+        cdr_def_det = seqs.get("4",  {}).get(f"{chain_key}_cdr_def") or "kabat"
+        cdr_def_stated = seqs.get("8",  {}).get(
+            f"{chain_key}_cdr_def") or "kabat"
+
         boundary_pipe = compute_boundary_positions(
-            mouse_seq, pipe_germ,   chain_type) if pipe_germ and mouse_seq else set()
+            mouse_seq, pipe_germ,   chain_type, cdr_def_pipe) if pipe_germ and mouse_seq else set()
         boundary_det = compute_boundary_positions(
-            mouse_seq, det_germ,    chain_type) if det_germ and mouse_seq else set()
+            mouse_seq, det_germ,    chain_type, cdr_def_det) if det_germ and mouse_seq else set()
         boundary_stated = compute_boundary_positions(
-            mouse_seq, stated_germ, chain_type) if stated_germ and mouse_seq else set()
+            mouse_seq, stated_germ, chain_type, cdr_def_stated) if stated_germ and mouse_seq else set()
 
         # ── Check seq 1: CDRs match mouse, FRs match pipeline germline ────────
         if s.get("1") and mouse_seq:
@@ -396,8 +423,10 @@ def load_generated(csv_path: str) -> dict:
             if clone not in clones:
                 clones[clone] = {"meta": {}}
             clones[clone][seq_id] = {
-                "vh": row.get("vh_sequence", "").strip(),
-                "vl": row.get("vl_sequence", "").strip(),
+                "vh":         row.get("vh_sequence", "").strip(),
+                "vl":         row.get("vl_sequence", "").strip(),
+                "vh_cdr_def": row.get("vh_cdr_def", "").strip() or None,
+                "vl_cdr_def": row.get("vl_cdr_def", "").strip() or None,
             }
             # Store metadata from first row of each clone
             meta = clones[clone]["meta"]
