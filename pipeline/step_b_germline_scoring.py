@@ -4,9 +4,11 @@ Returns a ranked list of top-N candidate germlines by framework identity.
 
 Depends on: step_a_numbering.py (for number_sequence and IMGT_REGIONS)
 """
-
+# isort: skip_file
+import sys
+sys.path.insert(0, "/workspace/antibody-humanization-tool")  # noqa: E402
 from anarci.germlines import all_germlines
-from step_a_numbering import IMGT_REGIONS, ALL_FR_POSITIONS
+from pipeline.step_a_numbering import IMGT_REGIONS, ALL_FR_POSITIONS
 
 
 # ── Load and parse germline database ─────────────────────────────────────────
@@ -166,6 +168,36 @@ def rank_germlines(
     # Sort by identity descending, then preferred families first on ties
     scores.sort(key=lambda x: (x["fr_identity"], x["preferred"]), reverse=True)
 
+    # Flag ties — computed across ALL scores before truncation to top_n
+    # so the tie count reflects the true number of tied germlines,
+    # not just those within the top_n window
+    if len(scores) > 1:
+        top_score = scores[0]["fr_identity"]
+        top_preferred = scores[0]["preferred"]
+        # Count all tied germlines in the full list (not just top_n)
+        all_tied = [
+            s for s in scores
+            if s["fr_identity"] == top_score and s["preferred"] == top_preferred
+        ]
+        is_tie = len(all_tied) > 1
+        n_tied = len(all_tied)
+        # allele-level, deduplicated
+        tied_genes = list(dict.fromkeys(s["germline"] for s in all_tied))
+        for s in scores:
+            if s["fr_identity"] == top_score and s["preferred"] == top_preferred:
+                s["is_tie"] = is_tie
+                s["n_tied"] = n_tied
+                s["tied_genes"] = tied_genes
+            else:
+                s["is_tie"] = False
+                s["n_tied"] = 0
+                s["tied_genes"] = []
+    else:
+        for s in scores:
+            s["is_tie"] = False
+            s["n_tied"] = 0
+            s["tied_genes"] = []
+
     return scores[:top_n]
 
 
@@ -187,6 +219,176 @@ def print_rankings(rankings: list[dict], chain_label: str = "") -> None:
             f"{entry['matched']:>3}/{entry['comparable']:<3} "
             f"{preferred_mark:>10}"
         )
+
+
+# ── Germline name normalization ───────────────────────────────────────────────
+# ANARCI and abnumber ship different versions of the IMGT germline database.
+# ANARCI has 23 kappa and 26 heavy germlines that abnumber does not recognise.
+# This function resolves any ANARCI germline name to the closest abnumber name
+# so grafting never fails due to a name mismatch.
+
+def _build_normalization_map() -> dict:
+    """
+    Build a mapping from ANARCI germline names → closest abnumber germline name.
+    Called once at import time and cached.
+
+    Resolution strategy (in order):
+      1. Exact match → use as-is
+      2. Same gene, different allele → use *01 of that gene
+      3. No gene match → find abnumber germline with most similar sequence
+    """
+    from anarci.germlines import all_germlines
+    from abnumber.germlines import get_imgt_v_chains
+
+    mapping = {}
+
+    for chain_type in ["H", "K", "L"]:
+        anarci_db = all_germlines["V"][chain_type]["human"]
+        abnumber_db = get_imgt_v_chains(chain_type)
+        abnumber_names = set(abnumber_db.keys())
+
+        for anarci_name in anarci_db:
+            if anarci_name in abnumber_names:
+                mapping[anarci_name] = anarci_name  # exact match
+                continue
+
+            gene = anarci_name.split("*")[0]
+
+            # Strategy 2: same gene, use *01 allele
+            allele01 = f"{gene}*01"
+            if allele01 in abnumber_names:
+                mapping[anarci_name] = allele01
+                continue
+
+            # Strategy 3: any allele of same gene
+            same_gene = [n for n in abnumber_names if n.startswith(gene + "*")]
+            if same_gene:
+                mapping[anarci_name] = sorted(same_gene)[0]
+                continue
+
+            # Strategy 4: sequence similarity — find abnumber germline whose
+            # aligned sequence is closest to the ANARCI germline's sequence
+            anarci_seq = anarci_db[anarci_name].replace("-", "")
+            best_name = None
+            best_score = -1
+            for ab_name, ab_chain in abnumber_db.items():
+                ab_seq = ab_chain.seq if hasattr(
+                    ab_chain, "seq") else str(ab_chain)
+                # Simple overlap identity
+                min_len = min(len(anarci_seq), len(ab_seq))
+                if min_len == 0:
+                    continue
+                matches = sum(a == b for a, b in zip(anarci_seq, ab_seq))
+                score = matches / min_len
+                if score > best_score:
+                    best_score = score
+                    best_name = ab_name
+            if best_name:
+                mapping[anarci_name] = best_name
+
+    return mapping
+
+
+# Build map at import time
+_GERMLINE_NAME_MAP = _build_normalization_map()
+
+
+def normalize_germline_name(anarci_name: str) -> str:
+    """
+    Resolve an ANARCI germline name to the closest abnumber-compatible name.
+    Returns the original name if it already exists in abnumber.
+    """
+    return _GERMLINE_NAME_MAP.get(anarci_name, anarci_name)
+
+# ── Normalization comparison utility ─────────────────────────────────────────
+
+
+def compare_normalized_germlines(anarci_name: str, chain_type: str) -> None:
+    """
+    Compare FR residues between an ANARCI germline name and its abnumber-normalized
+    equivalent. Always prints the comparison.
+
+    Shows 'identical' when names differ but FR sequences are the same — meaning
+    normalization is purely a naming convention change with no biological impact.
+    Shows per-position differences when FR sequences actually differ.
+    """
+    import sys as _sys
+
+    # normalize_germline_name is defined in this same module
+    normalized_name = normalize_germline_name(anarci_name)
+
+    print(f"\n  Normalization: {anarci_name} -> {normalized_name}")
+
+    if anarci_name == normalized_name:
+        print(f"  Names are identical — no normalization applied")
+        return
+
+    anarci_fr = _GERMLINE_FR_DB[chain_type].get(anarci_name)
+    normalized_fr = _GERMLINE_FR_DB[chain_type].get(normalized_name)
+
+    if anarci_fr is None:
+        print(f"  '{anarci_name}' not found in ANARCI database")
+        return
+    if normalized_fr is None:
+        print(
+            f"  '{normalized_name}' not found in ANARCI database — cannot compare")
+        return
+
+    all_positions = sorted(set(anarci_fr.keys()) | set(normalized_fr.keys()))
+    diffs = []
+    for pos in all_positions:
+        aa_a = anarci_fr.get(pos)
+        aa_n = normalized_fr.get(pos)
+        if aa_a != aa_n:
+            region = next(
+                (name for name, positions in IMGT_REGIONS.items() if pos in positions),
+                "unknown"
+            )
+            diffs.append({"pos": pos, "anarci": aa_a,
+                         "normalized": aa_n, "region": region})
+
+    if not diffs:
+        print(f"  FR sequences are IDENTICAL despite different names")
+        print(f"  -> Normalization has no biological impact for this germline")
+        return
+
+    print(f"  FR differences: {len(diffs)} position(s)")
+    print(
+        f"  {'Pos':>5}  {'Region':<8}  {anarci_name[:15]:>15}  {normalized_name[:15]:>15}")
+    print(f"  {'-'*5}  {'-'*8}  {'-'*15}  {'-'*15}")
+    for d in diffs:
+        aa_a = d["anarci"] or "-"
+        aa_n = d["normalized"] or "-"
+        print(f"  {d['pos']:>5}  {d['region']:<8}  {aa_a:>15}  {aa_n:>15}")
+
+    if len(diffs) <= 2:
+        print(f"  -> Minor difference — normalization is a safe substitution")
+    elif len(diffs) <= 5:
+        print(f"  -> Moderate difference — verify normalization is acceptable")
+    else:
+        print(f"  Warning: Significant difference ({len(diffs)} positions) "
+              f"— normalization may affect results")
+
+
+def print_normalization_report(rankings: list[dict], chain_type: str) -> None:
+    """
+    Print normalization report — only for germlines where ANARCI and abnumber
+    names differ. Skips identical names silently.
+    """
+    mismatches = [
+        entry for entry in rankings
+        if normalize_germline_name(entry["germline"]) != entry["germline"]
+    ]
+
+    if not mismatches:
+        return  # all names identical — nothing to report
+
+    print(f"\n{chr(61)*65}")
+    print(f"NORMALIZATION REPORT ({chain_type} chain) "
+          f"— {len(mismatches)}/{len(rankings)} names required normalization")
+    print(f"{chr(61)*65}")
+    for entry in mismatches:
+        compare_normalized_germlines(entry["germline"], chain_type)
 
 
 # ── Smoke test ────────────────────────────────────────────────────────────────

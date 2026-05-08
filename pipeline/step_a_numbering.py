@@ -23,15 +23,47 @@ ALL_CDR_POSITIONS = set().union(
     *(v for k, v in IMGT_REGIONS.items() if k.startswith("CDR")))
 
 
-def number_sequence(sequence: str, chain_type: str = None) -> dict:
+# ── Kabat CDR boundaries expressed in IMGT position numbers ──────────────────
+# Kabat defines CDR boundaries at slightly different positions than IMGT.
+# These are the IMGT position numbers that Kabat considers CDR (not FR).
+# Key differences from IMGT at boundaries:
+#   CDR1: Kabat starts at pos 31 (IMGT starts at 27) → pos 27-30 are FR under Kabat
+#   CDR2: Kabat ends at pos 65 (same) but starts at 50 (IMGT starts at 56)
+#   FR boundaries shift accordingly
+KABAT_REGIONS = {
+    "FR1":  set(range(1,   31)),    # positions 1-30  (IMGT: 1-26)
+    "CDR1": set(range(31,  36)),    # positions 31-35 (IMGT: 27-38)
+    "FR2":  set(range(36,  50)),    # positions 36-49 (IMGT: 39-55)
+    "CDR2": set(range(50,  66)),    # positions 50-65 (IMGT: 56-65)
+    "FR3":  set(range(66,  95)),    # positions 66-94 (IMGT: 66-104)
+    "CDR3": set(range(95,  103)),   # positions 95-102 (IMGT: 105-117)
+    "FR4":  set(range(103, 129)),   # positions 103-128 (IMGT: 118-128)
+}
+
+KABAT_FR_POSITIONS = set().union(
+    *(v for k, v in KABAT_REGIONS.items() if k.startswith("FR")))
+KABAT_CDR_POSITIONS = set().union(
+    *(v for k, v in KABAT_REGIONS.items() if k.startswith("CDR")))
+
+CDR_DEFINITIONS = {
+    "imgt":  (IMGT_REGIONS,  ALL_FR_POSITIONS,  ALL_CDR_POSITIONS),
+    "kabat": (KABAT_REGIONS, KABAT_FR_POSITIONS, KABAT_CDR_POSITIONS),
+}
+
+
+def number_sequence(sequence: str, chain_type: str = None,
+                    cdr_definition: str = "imgt") -> dict:
     """
     Number a raw antibody sequence with ANARCI under the IMGT scheme
     and split residues into framework (FR) and CDR dictionaries.
 
     Args:
-        sequence:   Raw amino acid string (single-letter codes, no gaps).
-        chain_type: 'H' for heavy chain, 'K' for kappa, 'L' for lambda.
-                    If None, ANARCI infers it automatically.
+        sequence:       Raw amino acid string (single-letter codes, no gaps).
+        chain_type:     'H' for heavy chain, 'K' for kappa, 'L' for lambda.
+                        If None, ANARCI infers it automatically.
+        cdr_definition: CDR boundary definition — 'imgt' (default) or 'kabat'.
+                        Controls which positions are classified as FR vs CDR.
+                        Use 'kabat' when processing sequences grafted using Kabat boundaries.
 
     Returns:
         dict:
@@ -51,7 +83,10 @@ def number_sequence(sequence: str, chain_type: str = None) -> dict:
         [("query", sequence)],
         scheme="imgt",
         assign_germline=True,
-        allowed_species=["human", "mouse"],  # accept mouse input sequence
+        allowed_species=["human"],  # assign to human germlines only
+        # Note: this does NOT prevent mouse sequences from being numbered —
+        # ANARCI numbers any valid antibody sequence regardless of species.
+        # allowed_species only controls which germline DB is used for v_gene assignment.
         allow=allow_set,
     )
 
@@ -76,6 +111,12 @@ def number_sequence(sequence: str, chain_type: str = None) -> dict:
     v_identity = v_gene_info[1] if v_gene_info[1] else None  # e.g. 0.824
     j_gene = j_gene_info[0][1] if j_gene_info[0] else None
 
+    # ── Select CDR boundary definition ────────────────────────────────────────
+    if cdr_definition not in CDR_DEFINITIONS:
+        raise ValueError(
+            f"cdr_definition must be 'imgt' or 'kabat'. Got: {cdr_definition!r}")
+    regions, fr_positions, cdr_positions = CDR_DEFINITIONS[cdr_definition]
+
     # ── Split into FR and CDR dicts ────────────────────────────────────────────
     fr_residues = {}
     cdr_residues = {}
@@ -88,22 +129,22 @@ def number_sequence(sequence: str, chain_type: str = None) -> dict:
         # Treat any insertion-code position as CDR regardless of numeric pos.
         if ins_code != " ":
             cdr_residues[(pos, ins_code)] = aa
-        elif pos in ALL_FR_POSITIONS:
+        elif pos in fr_positions:
             fr_residues[pos] = aa
-        elif pos in ALL_CDR_POSITIONS:
+        elif pos in cdr_positions:
             cdr_residues[pos] = aa
         # positions outside 1-128 are rare edge cases — silently skip
 
     # ── Group by named region ──────────────────────────────────────────────────
     fr_by_region = {
         name: {p: fr_residues[p] for p in bounds if p in fr_residues}
-        for name, bounds in IMGT_REGIONS.items()
+        for name, bounds in regions.items()
         if name.startswith("FR")
     }
 
     cdr_by_region = {
         name: {p: cdr_residues.get(p) for p in bounds if p in cdr_residues}
-        for name, bounds in IMGT_REGIONS.items()
+        for name, bounds in regions.items()
         if name.startswith("CDR")
     }
 
