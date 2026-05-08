@@ -4,11 +4,9 @@ Returns a ranked list of top-N candidate germlines by framework identity.
 
 Depends on: step_a_numbering.py (for number_sequence and IMGT_REGIONS)
 """
-# isort: skip_file
-import sys
-sys.path.insert(0, "/workspace/antibody-humanization-tool")  # noqa: E402
+
 from anarci.germlines import all_germlines
-from pipeline.step_a_numbering import IMGT_REGIONS, ALL_FR_POSITIONS
+from step_a_numbering import IMGT_REGIONS, ALL_FR_POSITIONS
 
 
 # ── Load and parse germline database ─────────────────────────────────────────
@@ -272,8 +270,16 @@ def _build_normalization_map() -> dict:
             best_name = None
             best_score = -1
             for ab_name, ab_chain in abnumber_db.items():
-                ab_seq = ab_chain.seq if hasattr(
-                    ab_chain, "seq") else str(ab_chain)
+                # abnumber returns Chain objects — extract sequence via iteration
+                try:
+                    ab_seq = "".join(aa for pos, aa in ab_chain)
+                except Exception:
+                    try:
+                        ab_seq = ab_chain.seq if hasattr(
+                            ab_chain, "seq") else str(ab_chain)
+                    except Exception:
+                        continue
+                ab_seq = ab_seq.replace("-", "")
                 # Simple overlap identity
                 min_len = min(len(anarci_seq), len(ab_seq))
                 if min_len == 0:
@@ -296,9 +302,20 @@ _GERMLINE_NAME_MAP = _build_normalization_map()
 def normalize_germline_name(anarci_name: str) -> str:
     """
     Resolve an ANARCI germline name to the closest abnumber-compatible name.
-    Returns the original name if it already exists in abnumber.
+    Handles both allele-level (IGKV1D-7-1*01) and gene-level (IGKV1D-7-1) names.
+    Returns the original name if no mapping found.
     """
-    return _GERMLINE_NAME_MAP.get(anarci_name, anarci_name)
+    # Try exact match first
+    if anarci_name in _GERMLINE_NAME_MAP:
+        return _GERMLINE_NAME_MAP[anarci_name]
+    # Try with *01 allele suffix added (for gene-level names without allele)
+    if "*" not in anarci_name:
+        allele01 = f"{anarci_name}*01"
+        if allele01 in _GERMLINE_NAME_MAP:
+            # Return the mapped value but strip allele if input had no allele
+            mapped = _GERMLINE_NAME_MAP[allele01]
+            return mapped.split("*")[0] if "*" not in anarci_name else mapped
+    return anarci_name
 
 # ── Normalization comparison utility ─────────────────────────────────────────
 
