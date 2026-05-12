@@ -4,15 +4,20 @@ generate_sequences.py
 Generates all 9 evaluation sequences for a given antibody clone.
 
 Sequences produced:
-  1. pipeline_grafted              — mouse CDRs + pipeline top-1 germline FRs
-  2. pipeline_humanized            — seq 1 + Sapiens back-mutations
-  3. lab_grafted                   — lab's Hu sequence (ground truth, read from CSV)
-  4. detected_germline_grafted     — mouse CDRs + detected lab germline FRs
-  5. lab_final                     — lab's final humanized sequence (ground truth, read from CSV)
-  6. detected_humanized            — seq 4 + Sapiens back-mutations
-  7. detected_direct_backmut       — seq 4 + back-mutations where seq3 != seq5
-  8. lab_stated_germline_grafted   — mouse CDRs + lab's stated germline FRs (from database)
-  9. lab_stated_germline_humanized — seq 8 + Sapiens back-mutations
+  0.  sapiens_on_mouse             — mouse → Sapiens → CDR restored (pure model output)
+  0r. sapiens_on_mouse_raw         — mouse → Sapiens raw (before CDR restoration)
+  1.  pipeline_grafted             — mouse CDRs + pipeline top-1 germline FRs
+  2.  pipeline_humanized           — seq 1 + Sapiens → CDR restored
+  2r. pipeline_humanized_raw       — seq 1 + Sapiens raw
+  3.  lab_grafted                  — lab's Hu sequence (ground truth, from CSV)
+  4.  detected_germline_grafted    — mouse CDRs + detected lab germline FRs
+  5.  lab_final                    — lab's final humanized sequence (ground truth, from CSV)
+  6.  detected_humanized           — seq 4 + Sapiens → CDR restored
+  6r. detected_humanized_raw       — seq 4 + Sapiens raw
+  7.  detected_direct_backmut      — seq 4 + back-mutations where seq3 != seq5
+  8.  lab_stated_germline_grafted  — mouse CDRs + lab's stated germline FRs (from database)
+  9.  lab_stated_germline_humanized — seq 8 + Sapiens → CDR restored
+  9r. lab_stated_germline_humanized_raw — seq 8 + Sapiens raw
 
 Usage (from project root):
     python3 pipeline/generate_sequences.py \\
@@ -60,6 +65,8 @@ class CloneSequences:
     clone_id: str
 
     # VH sequences
+    vh_0_sapiens_on_mouse:              Optional[str] = None
+    vh_0_sapiens_on_mouse_raw:          Optional[str] = None
     vh_1_pipeline_grafted:              Optional[str] = None
     vh_2_pipeline_humanized:            Optional[str] = None
     vh_3_lab_grafted:                   Optional[str] = None
@@ -70,12 +77,14 @@ class CloneSequences:
     vh_8_stated_germline_grafted:       Optional[str] = None
     vh_9_stated_germline_humanized:     Optional[str] = None
 
-    # VH Sapiens raw output (before CDR restoration) — for comparison with CDR-restored versions
+    # VH Sapiens raw output (before CDR restoration)
     vh_2_pipeline_humanized_raw:        Optional[str] = None
     vh_6_detected_humanized_raw:        Optional[str] = None
     vh_9_stated_germline_humanized_raw: Optional[str] = None
 
     # VL sequences
+    vl_0_sapiens_on_mouse:              Optional[str] = None
+    vl_0_sapiens_on_mouse_raw:          Optional[str] = None
     vl_1_pipeline_grafted:              Optional[str] = None
     vl_2_pipeline_humanized:            Optional[str] = None
     vl_3_lab_grafted:                   Optional[str] = None
@@ -424,6 +433,19 @@ def generate_sequences(
         if stated_vl_germ:
             print(f"    Lab-stated VL germline: {stated_vl_germ}")
 
+        # ── Sequence 0: Sapiens applied directly to mouse (no grafting) ─────
+        # This is the pure model output — no human germline selection,
+        # no CDR grafting. Sapiens predicts the most human-like residue
+        # at every position starting from the raw mouse sequence.
+        # CDR positions are restored after Sapiens runs (same as seqs 2, 6, 9).
+        # Post-hoc germline detection on seq 0 will identify which human
+        # germline Sapiens converged toward (handled in score_sequences.py).
+        print(f"    Generating seq 0 (Sapiens directly on mouse — pure model output)...")
+        result.vh_0_sapiens_on_mouse, result.vh_0_sapiens_on_mouse_raw = (
+            humanize_sapiens(mouse_vh, "H"))
+        result.vl_0_sapiens_on_mouse, result.vl_0_sapiens_on_mouse_raw = (
+            humanize_sapiens(mouse_vl, vl_chain_type))
+
         # ── Sequence 1: pipeline grafted ──────────────────────────────────────
         print(
             f"    Generating seq 1 (pipeline grafted — selecting longest CDR definition)...")
@@ -522,6 +544,8 @@ def generate_sequences(
 # ── Output helpers ────────────────────────────────────────────────────────────
 
 SEQ_LABELS = {
+    "0":  "sapiens_on_mouse",
+    "0r": "sapiens_on_mouse_raw",
     "1": "pipeline_grafted",
     "2": "pipeline_humanized",
     "3": "lab_grafted",
@@ -575,6 +599,8 @@ def export_sequences(all_seqs: list, output_path: str) -> None:
             vl = _get_seq(seqs, num, label, "vl")
             # Determine which CDR definition was used for this sequence group
             cdr_def_map = {
+                "0":  (None, None),  # Sapiens on mouse — no CDR grafting used
+                "0r": (None, None),
                 "1": (seqs.vh_cdr_def_pipeline, seqs.vl_cdr_def_pipeline),
                 "2": (seqs.vh_cdr_def_pipeline, seqs.vl_cdr_def_pipeline),
                 "2r": (seqs.vh_cdr_def_pipeline, seqs.vl_cdr_def_pipeline),
