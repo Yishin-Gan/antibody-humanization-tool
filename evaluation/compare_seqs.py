@@ -302,11 +302,22 @@ def level_3_conflict_positions(clone_id, mouse_vh, mouse_vl,
                 sapiens_restored = (s6aa == maa)
 
                 if lab_restored and not sapiens_restored:
+                    # Higher risk: lab said keep mouse, Sapiens kept human
                     conflicts.append({
                         "imgt_pos": pos, "mouse_aa": maa,
                         "seq3_aa": s3aa, "seq5_aa": s5aa, "seq6_aa": s6aa,
                         "lab_decision": "back_mutated",
                         "sapiens_decision": "humanized",
+                        "direction": "sap_over_humanized",
+                    })
+                elif not lab_restored and sapiens_restored:
+                    # Lower risk: lab kept human, Sapiens restored to mouse
+                    conflicts.append({
+                        "imgt_pos": pos, "mouse_aa": maa,
+                        "seq3_aa": s3aa, "seq5_aa": s5aa, "seq6_aa": s6aa,
+                        "lab_decision": "humanized",
+                        "sapiens_decision": "back_mutated",
+                        "direction": "sap_over_conservative",
                     })
                 elif lab_restored and sapiens_restored:
                     agreements.append(
@@ -315,7 +326,17 @@ def level_3_conflict_positions(clone_id, mouse_vh, mouse_vl,
                     agreements.append(
                         {"imgt_pos": pos, "decision": "both_humanized"})
 
+            # Split conflicts by direction
+            sap_over_humanized = [
+                c for c in conflicts if c["direction"] == "sap_over_humanized"]
+            sap_over_conservative = [
+                c for c in conflicts if c["direction"] == "sap_over_conservative"]
+
             row[f"{chain}_conflict_count"] = len(conflicts)
+            row[f"{chain}_conflict_sap_over_humanized"] = len(
+                sap_over_humanized)
+            row[f"{chain}_conflict_sap_over_conservative"] = len(
+                sap_over_conservative)
             row[f"{chain}_conflict_positions"] = str(conflicts)
             row[f"{chain}_agreement_count"] = len(agreements)
 
