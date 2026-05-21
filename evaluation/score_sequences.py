@@ -41,6 +41,7 @@ sys.path.insert(0, "/workspace/antibody-humanization-tool")  # noqa: E402
 from pipeline.step_a_numbering import number_sequence
 from typing import Optional
 import argparse
+import ast
 import csv
 import re
 import math
@@ -316,7 +317,29 @@ def compute_cdr_properties(numbered: dict) -> dict:
     all_cdr_residues = []
 
     for region in ["CDR1", "CDR2", "CDR3"]:
-        residues = numbered["cdr_by_region"].get(region, {})
+        # Primary source: cdr_by_region[region] gives integer-keyed positions
+        # for this CDR. But IMGT insertion positions (e.g. (111,'A'), (112,'A'))
+        # are stored in cdr_residues with tuple keys and labelled as broad 'CDR'
+        # by _get_region_label(), so they are NOT in cdr_by_region[region].
+        # Fix: merge cdr_by_region[region] with any tuple-keyed cdr_residues
+        # that fall within the IMGT integer range of this CDR.
+        named = numbered["cdr_by_region"].get(region, {})
+
+        # Determine the integer IMGT range spanned by this named CDR
+        int_positions = [p for p in named if isinstance(p, int)]
+        if int_positions:
+            cdr_min, cdr_max = min(int_positions), max(int_positions)
+            # Pick up any tuple-keyed (insertion) positions in cdr_residues
+            # whose integer part falls within [cdr_min, cdr_max]
+            extras = {
+                pos: aa
+                for pos, aa in numbered["cdr_residues"].items()
+                if isinstance(pos, tuple) and cdr_min <= pos[0] <= cdr_max
+            }
+        else:
+            extras = {}
+
+        residues = {**named, **extras}
         seq = "".join(residues[p] for p in sorted(
             residues.keys(),
             key=lambda x: (x[0], x[1]) if isinstance(x, tuple) else (x, ' ')
@@ -351,10 +374,13 @@ def compute_cdr_properties(numbered: dict) -> dict:
 # ── Vernier zone analysis ─────────────────────────────────────────────────────
 
 def compute_vernier(
-    query_numbered:   dict,
-    mouse_numbered:   dict,
-    grafted_numbered: Optional[dict],
-    chain_type:       str,
+    query_numbered:    dict,
+    mouse_numbered:    dict,
+    grafted_numbered:  Optional[dict],
+    chain_type:        str,
+    oasis_pos_map:     Optional[dict] = None,
+    mouse_oasis_map:   Optional[dict] = None,
+    grafted_oasis_map: Optional[dict] = None,
 ) -> dict:
     """
     Analyse back-mutations at FR positions, with Vernier zone subgrouping.
@@ -419,13 +445,43 @@ def compute_vernier(
 
     grafted_fr = grafted_numbered["fr_residues"] if grafted_numbered else {}
 
-    # All FR positions present in both mouse and query
-    all_fr_positions = set(mouse_fr) & set(query_fr)
+    # Iterate over query FR positions as the canonical IMGT coordinate system.
+    # Do NOT use set(mouse_fr) & set(query_fr): when mouse and query have CDR1
+    # sequences of different lengths, ANARCI can assign different IMGT numbers
+    # to the same physical FR residue (e.g. mouse CDR1=6 residues vs query CDR1=7
+    # shifts mouse FR2 positions by +1 in the intersection, causing backmut_detail
+    # to store systematically wrong IMGT positions for FR2 onwards).
+    # Using query_fr as the canonical coordinate ensures backmut_detail positions
+    # are consistent with oasis_per_position_detail (which is also query-based).
+    #
+    # Mouse residue lookup: find the mouse residue at the same IMGT position.
+    # If the mouse was numbered with a different CDR1 length, some query positions
+    # will be absent in mouse_fr — these are skipped (not mutable by definition,
+    # since we can't determine the mouse state).
+    # Use oasis_pos_map (from abnumber/BioPhi) as the canonical IMGT coordinate
+    # when available. abnumber and number_sequence (ANARCI) can assign different
+    # IMGT positions for the same residue in sequences with non-standard CDR1
+    # lengths (e.g. 8C11/2B6 VL), causing backmut_detail to be offset vs oasis.
+    # Using the same coordinate system as oasis ensures consistency.
+    if oasis_pos_map is not None:
+        # oasis_pos_map: {imgt_pos: aa} for FR positions only
+        all_fr_positions = sorted(
+            p for p in oasis_pos_map if p in query_fr or p in oasis_pos_map)
+        # Override query_fr and mouse_fr lookups with oasis-based positions
+        # For query: use oasis_pos_map (same source as oasis_per_position_detail)
+        # For mouse: use mouse_fr at the same IMGT position (best effort)
+        _oasis_query_fr = oasis_pos_map
+    else:
+        all_fr_positions = sorted(query_fr.keys())
+        _oasis_query_fr = None
 
     detail = []
-    for pos in sorted(all_fr_positions):
-        mouse_aa = mouse_fr.get(pos)
-        query_aa = query_fr.get(pos)
+    for pos in all_fr_positions:
+        # Use oasis-based mouse residue when available (same IMGT coordinates as query oasis)
+        mouse_aa = (mouse_oasis_map.get(pos) if mouse_oasis_map is not None
+                    else mouse_fr.get(pos))
+        query_aa = (_oasis_query_fr.get(pos) if _oasis_query_fr is not None
+                    else query_fr.get(pos))
 
         if mouse_aa is None or query_aa is None:
             continue
@@ -438,11 +494,27 @@ def compute_vernier(
             status = "humanized_by_sapiens"
             grafted_aa = None  # no grafted baseline exists
         else:
-            grafted_aa = grafted_fr.get(pos)
+            # Use oasis-based grafted residue when available
+            grafted_aa = (grafted_oasis_map.get(pos) if grafted_oasis_map is not None
+                          else grafted_fr.get(pos))
             if grafted_aa is None:
                 continue
             # Skip positions where mouse and grafted already agree — not mutable
+            # EXCEPTION: if Sapiens changed this position anyway (query ≠ mouse),
+            # record it as 'sapiens_changed_non_mutable' so it's visible in the Vernier tab.
             if mouse_aa == grafted_aa:
+                if query_aa == mouse_aa:
+                    continue  # truly unchanged — skip
+                # Sapiens changed a non-mutable position
+                status = "sapiens_changed_non_mutable"
+                detail.append({
+                    "imgt_pos":   pos,
+                    "is_vernier": pos in vernier_set,
+                    "mouse_aa":   mouse_aa,
+                    "grafted_aa": grafted_aa,
+                    "query_aa":   query_aa,
+                    "status":     status,
+                })
                 continue
             # Three-way classification
             if query_aa == mouse_aa:
@@ -773,31 +845,46 @@ def compute_oasis(vh_seq: str, vl_seq: str, clone_id: str = "",
 
 def compute_germline_identity(
     query_numbered: dict,
-    germline_name: str,
-    chain_type: str,
+    germline_name:  str,
+    chain_type:     str,
+    germ_cdr1_len:  Optional[int] = None,
 ) -> Optional[float]:
-    """Compute FR identity between query sequence and named germline."""
+    """Compute FR identity between query sequence and named germline.
+
+    Uses number_sequence fr_residues and _GERMLINE_FR_DB — same coordinate system.
+
+    CDR1-mismatch guard: when query CDR1 length differs from the germline's
+    native CDR1 length (passed as germ_cdr1_len, inferred from the CDR1 length
+    of the seq1/seq3 grafted scaffolds), number_sequence assigns different FR2+
+    IMGT positions, making the comparison unreliable. Returns None in that case.
+    _GERMLINE_FR_DB stores only FR residues so cannot provide CDR1 length directly.
+    """
     if not germline_name:
-        return None
+        return None, None
+    # CDR1-mismatch guard
+    if germ_cdr1_len is not None:
+        query_cdr1 = query_numbered.get("cdr_by_region", {}).get("CDR1", {})
+        query_cdr1_len = len(query_cdr1)
+        if query_cdr1_len > 0 and query_cdr1_len != germ_cdr1_len:
+            return None, None
     try:
-        from pipeline.step_b_germline_scoring import rank_germlines
-        rankings = rank_germlines(
-            query_fr=query_numbered["fr_residues"],
-            chain_type=chain_type,
-            top_n=1,
-            min_identity=0.0,
-        )
-        # Find this specific germline in rankings
         from pipeline.step_b_germline_scoring import _GERMLINE_FR_DB
         from pipeline.step_a_numbering import ALL_FR_POSITIONS
+        # Use exact allele match when allele suffix is provided (e.g. IGHV1-69*02)
+        # Fall back to gene-level first-match when no suffix (e.g. IGHV1-2)
         germ_gene = germline_name.split("*")[0]
+        has_allele = "*" in germline_name
         germ_fr = {}
-        for allele, residues in _GERMLINE_FR_DB.get(chain_type, {}).items():
-            if allele.split("*")[0] == germ_gene:
-                germ_fr = residues
-                break
+        db_chain = _GERMLINE_FR_DB.get(chain_type, {})
+        if has_allele and germline_name in db_chain:
+            germ_fr = db_chain[germline_name]
+        else:
+            for allele, residues in db_chain.items():
+                if allele.split("*")[0] == germ_gene:
+                    germ_fr = residues
+                    break
         if not germ_fr:
-            return None
+            return None, None
         query_fr = query_numbered["fr_residues"]
         matched = comparable = 0
         for pos in ALL_FR_POSITIONS:
@@ -807,30 +894,194 @@ def compute_germline_identity(
                 comparable += 1
                 if q == g:
                     matched += 1
-        return round(matched / comparable, 3) if comparable else None
+        return (round(matched / comparable, 3) if comparable else None), germ_fr
+    except Exception:
+        return None, None
+
+
+def compute_structure_scores(vh_seq: str, vl_seq: str, clone_id: str) -> dict:
+    """
+    Predict Fv structure with ABodyBuilder2 and compute per-residue confidence scores.
+
+    ABodyBuilder2 uses an ensemble of 4 models and outputs error_estimates —
+    lower error = higher confidence (inverse of pLDDT).
+    We use the best-ranked model and convert to a 0-100 confidence scale:
+        confidence = 100 * exp(-error_estimate)
+    This maps:
+        error=0.0  → confidence=100  (perfect)
+        error=0.1  → confidence=90
+        error=0.5  → confidence=61
+        error=1.0  → confidence=37
+        error=2.0  → confidence=14
+
+    Requires: pip install ImmuneBuilder --break-system-packages
+    Runs without OpenMM/pdbfixer (no structure refinement).
+    """
+    empty = {
+        "conf_mean_vh": None, "conf_mean_vl": None, "conf_mean_fv": None,
+        "conf_min_vh":  None, "conf_min_vl":  None,
+        "conf_cdr_mean_vh": None, "conf_cdr_mean_vl": None,
+        "conf_fr_mean_vh":  None, "conf_fr_mean_vl":  None,
+        "conf_cdr1_mean_vh": None, "conf_cdr2_mean_vh": None, "conf_cdr3_mean_vh": None,
+        "conf_cdr1_mean_vl": None, "conf_cdr2_mean_vl": None, "conf_cdr3_mean_vl": None,
+    }
+
+    try:
+        import numpy as np
+        from ImmuneBuilder import ABodyBuilder2
+
+        predictor = ABodyBuilder2()
+        antibody = predictor.predict({"H": vh_seq, "L": vl_seq})
+
+        # error_estimates shape: [4 models, n_residues]
+        # ranking: best model first
+        best_model_idx = antibody.ranking[0]
+        errors = antibody.error_estimates[best_model_idx].cpu().numpy()
+
+        # Convert error → confidence score 0-100
+        confidence = 100.0 * np.exp(-errors)
+
+        # Split VH and VL by sequence length
+        n_vh = len(vh_seq)
+        conf_vh = confidence[:n_vh]
+        conf_vl = confidence[n_vh:n_vh + len(vl_seq)]
+
+        # Map to CDR/FR regions using our numbering
+        try:
+            vh_num = number_sequence(vh_seq, chain_type="H")
+            vl_num = number_sequence(vl_seq, chain_type=None)
+
+            def _imgt_sort_key(pos):
+                """Sort IMGT positions including insertion tuples e.g. (111,'A')."""
+                if isinstance(pos, tuple):
+                    return (pos[0], pos[1])
+                return (pos, ' ')
+
+            def split_cdr_fr(num, conf_arr):
+                """Split confidence scores into CDR (pooled), per-CDR, and FR arrays."""
+                # Build ordered position list with region labels
+                all_res = {}
+                for pos in num["fr_residues"]:
+                    all_res[pos] = "FR"
+                for pos in num["cdr_residues"]:
+                    all_res[pos] = "CDR"
+                ordered = sorted(all_res.keys(), key=_imgt_sort_key)
+
+                # CDR1/2/3 IMGT integer ranges (inclusive)
+                CDR_RANGES = {
+                    "CDR1": (27, 38),
+                    "CDR2": (56, 65),
+                    "CDR3": (105, 117),
+                }
+
+                cdr_conf = []
+                fr_conf = []
+                cdr1_conf = []
+                cdr2_conf = []
+                cdr3_conf = []
+
+                for i, pos in enumerate(ordered):
+                    if i >= len(conf_arr):
+                        break
+                    val = conf_arr[i]
+                    region = all_res[pos]
+                    int_pos = pos[0] if isinstance(pos, tuple) else pos
+
+                    if region == "CDR":
+                        cdr_conf.append(val)
+                        # Assign to CDR1/2/3 by IMGT integer position range
+                        for cdr_name, (lo, hi) in CDR_RANGES.items():
+                            if lo <= int_pos <= hi:
+                                if cdr_name == "CDR1":
+                                    cdr1_conf.append(val)
+                                elif cdr_name == "CDR2":
+                                    cdr2_conf.append(val)
+                                elif cdr_name == "CDR3":
+                                    cdr3_conf.append(val)
+                                break
+                    else:
+                        fr_conf.append(val)
+
+                def safe_mean(arr):
+                    return round(float(np.mean(arr)), 2) if arr else None
+
+                return {
+                    "cdr":  np.array(cdr_conf),
+                    "fr":   np.array(fr_conf),
+                    "cdr1": safe_mean(cdr1_conf),
+                    "cdr2": safe_mean(cdr2_conf),
+                    "cdr3": safe_mean(cdr3_conf),
+                }
+
+            vh_split = split_cdr_fr(vh_num, conf_vh)
+            vl_split = split_cdr_fr(vl_num, conf_vl)
+
+            vh_cdr_conf = vh_split["cdr"]
+            vh_fr_conf = vh_split["fr"]
+            vl_cdr_conf = vl_split["cdr"]
+            vl_fr_conf = vl_split["fr"]
+
+            cdr_mean_vh = round(float(np.mean(vh_cdr_conf)),
+                                2) if len(vh_cdr_conf) else None
+            cdr_mean_vl = round(float(np.mean(vl_cdr_conf)),
+                                2) if len(vl_cdr_conf) else None
+            fr_mean_vh = round(float(np.mean(vh_fr_conf)),
+                               2) if len(vh_fr_conf) else None
+            fr_mean_vl = round(float(np.mean(vl_fr_conf)),
+                               2) if len(vl_fr_conf) else None
+        except Exception:
+            cdr_mean_vh = cdr_mean_vl = fr_mean_vh = fr_mean_vl = None
+
+        return {
+            "conf_mean_vh":     round(float(np.mean(conf_vh)), 2),
+            "conf_mean_vl":     round(float(np.mean(conf_vl)), 2),
+            "conf_mean_fv":     round(float(np.mean(confidence)), 2),
+            "conf_min_vh":      round(float(np.min(conf_vh)),  2),
+            "conf_min_vl":      round(float(np.min(conf_vl)),  2),
+            "conf_cdr_mean_vh": cdr_mean_vh,
+            "conf_cdr_mean_vl": cdr_mean_vl,
+            "conf_fr_mean_vh":  fr_mean_vh,
+            "conf_fr_mean_vl":  fr_mean_vl,
+            "conf_cdr1_mean_vh": vh_split["cdr1"],
+            "conf_cdr2_mean_vh": vh_split["cdr2"],
+            "conf_cdr3_mean_vh": vh_split["cdr3"],
+            "conf_cdr1_mean_vl": vl_split["cdr1"],
+            "conf_cdr2_mean_vl": vl_split["cdr2"],
+            "conf_cdr3_mean_vl": vl_split["cdr3"],
+        }
+
+    except ImportError:
+        print(f"    ABodyBuilder2 not available — pip install ImmuneBuilder")
+        return empty
+    except Exception as e:
+        print(f"    Structure scoring failed for {clone_id}: {e}")
+        return empty
+
+
+# ── Sequence identity between two sequences ───────────────────────────────────
+
+def sequence_identity(seq_a: str, seq_b: str, chain_type: str) -> Optional[float]:
+    """Compute FR+CDR sequence identity between two numbered sequences."""
+    if not seq_a or not seq_b:
+        return None
+    try:
+        num_a = number_sequence(seq_a, chain_type=chain_type)
+        num_b = number_sequence(seq_b, chain_type=chain_type)
+        all_a = {**num_a["fr_residues"], **{k: v for k,
+                                            v in num_a["cdr_residues"].items() if isinstance(k, int)}}
+        all_b = {**num_b["fr_residues"], **{k: v for k,
+                                            v in num_b["cdr_residues"].items() if isinstance(k, int)}}
+        positions = set(all_a) & set(all_b)
+        if not positions:
+            return None
+        matched = sum(1 for p in positions if all_a[p] == all_b[p])
+        return round(matched / len(positions), 3)
     except Exception:
         return None
 
 
-# ── Structure scoring ─────────────────────────────────────────────────────────
+# ── Main scoring function ─────────────────────────────────────────────────────
 
-# ── CamSol intrinsic solubility ───────────────────────────────────────────────
-# Reimplementation of the CamSol intrinsic (sequence-only) algorithm.
-# Reference: Sormanni et al., J. Mol. Biol. 2015
-#            doi:10.1016/j.jmb.2014.09.026
-#
-# Algorithm:
-#   1. Per-residue hydrophobicity (Wimley-White scale, sign-inverted so
-#      positive = aggregation-prone, negative = solubility-promoting)
-#   2. Per-residue charge at pH 7
-#   3. Secondary structure propensity correction (beta-sheet propensity
-#      increases aggregation risk; alpha-helix propensity reduces it)
-#   4. Smoothing over a window of 5 neighbors (window size 9)
-#   5. Final score = mean of smoothed profile = intrinsic solubility score
-#      Higher score = more soluble
-
-# Wimley-White hydrophobicity scale (sign-inverted from CamSol convention:
-# positive = hydrophobic = aggregation-prone)
 _CAMSOL_HYDROPHOBICITY = {
     'F':  1.06, 'I':  0.67, 'L':  0.57, 'W':  0.50, 'V':  0.40,
     'M':  0.26, 'A':  0.17, 'C':  0.13, 'P': -0.29, 'G': -0.01,
@@ -878,6 +1129,8 @@ def compute_structure_scores(vh_seq: str, vl_seq: str, clone_id: str) -> dict:
         "conf_min_vh":  None, "conf_min_vl":  None,
         "conf_cdr_mean_vh": None, "conf_cdr_mean_vl": None,
         "conf_fr_mean_vh":  None, "conf_fr_mean_vl":  None,
+        "conf_cdr1_mean_vh": None, "conf_cdr2_mean_vh": None, "conf_cdr3_mean_vh": None,
+        "conf_cdr1_mean_vl": None, "conf_cdr2_mean_vl": None, "conf_cdr3_mean_vl": None,
     }
 
     try:
@@ -912,21 +1165,68 @@ def compute_structure_scores(vh_seq: str, vl_seq: str, clone_id: str) -> dict:
                 return (pos, ' ')
 
             def split_cdr_fr(num, conf_arr):
-                """Split confidence scores into CDR and FR arrays."""
+                """Split confidence scores into CDR (pooled), per-CDR, and FR arrays."""
+                # Build ordered position list with region labels
                 all_res = {}
                 for pos in num["fr_residues"]:
                     all_res[pos] = "FR"
                 for pos in num["cdr_residues"]:
                     all_res[pos] = "CDR"
                 ordered = sorted(all_res.keys(), key=_imgt_sort_key)
-                cdr_conf = [conf_arr[i] for i, pos in enumerate(ordered)
-                            if i < len(conf_arr) and all_res[pos] == "CDR"]
-                fr_conf = [conf_arr[i] for i, pos in enumerate(ordered)
-                           if i < len(conf_arr) and all_res[pos] == "FR"]
-                return np.array(cdr_conf), np.array(fr_conf)
 
-            vh_cdr_conf, vh_fr_conf = split_cdr_fr(vh_num, conf_vh)
-            vl_cdr_conf, vl_fr_conf = split_cdr_fr(vl_num, conf_vl)
+                # CDR1/2/3 IMGT integer ranges (inclusive)
+                CDR_RANGES = {
+                    "CDR1": (27, 38),
+                    "CDR2": (56, 65),
+                    "CDR3": (105, 117),
+                }
+
+                cdr_conf = []
+                fr_conf = []
+                cdr1_conf = []
+                cdr2_conf = []
+                cdr3_conf = []
+
+                for i, pos in enumerate(ordered):
+                    if i >= len(conf_arr):
+                        break
+                    val = conf_arr[i]
+                    region = all_res[pos]
+                    int_pos = pos[0] if isinstance(pos, tuple) else pos
+
+                    if region == "CDR":
+                        cdr_conf.append(val)
+                        # Assign to CDR1/2/3 by IMGT integer position range
+                        for cdr_name, (lo, hi) in CDR_RANGES.items():
+                            if lo <= int_pos <= hi:
+                                if cdr_name == "CDR1":
+                                    cdr1_conf.append(val)
+                                elif cdr_name == "CDR2":
+                                    cdr2_conf.append(val)
+                                elif cdr_name == "CDR3":
+                                    cdr3_conf.append(val)
+                                break
+                    else:
+                        fr_conf.append(val)
+
+                def safe_mean(arr):
+                    return round(float(np.mean(arr)), 2) if arr else None
+
+                return {
+                    "cdr":  np.array(cdr_conf),
+                    "fr":   np.array(fr_conf),
+                    "cdr1": safe_mean(cdr1_conf),
+                    "cdr2": safe_mean(cdr2_conf),
+                    "cdr3": safe_mean(cdr3_conf),
+                }
+
+            vh_split = split_cdr_fr(vh_num, conf_vh)
+            vl_split = split_cdr_fr(vl_num, conf_vl)
+
+            vh_cdr_conf = vh_split["cdr"]
+            vh_fr_conf = vh_split["fr"]
+            vl_cdr_conf = vl_split["cdr"]
+            vl_fr_conf = vl_split["fr"]
 
             cdr_mean_vh = round(float(np.mean(vh_cdr_conf)),
                                 2) if len(vh_cdr_conf) else None
@@ -949,6 +1249,12 @@ def compute_structure_scores(vh_seq: str, vl_seq: str, clone_id: str) -> dict:
             "conf_cdr_mean_vl": cdr_mean_vl,
             "conf_fr_mean_vh":  fr_mean_vh,
             "conf_fr_mean_vl":  fr_mean_vl,
+            "conf_cdr1_mean_vh": vh_split["cdr1"],
+            "conf_cdr2_mean_vh": vh_split["cdr2"],
+            "conf_cdr3_mean_vh": vh_split["cdr3"],
+            "conf_cdr1_mean_vl": vl_split["cdr1"],
+            "conf_cdr2_mean_vl": vl_split["cdr2"],
+            "conf_cdr3_mean_vl": vl_split["cdr3"],
         }
 
     except ImportError:
@@ -1001,17 +1307,20 @@ def compute_camsol(seq: str, numbered: Optional[dict] = None) -> dict:
         camsol_score          float  overall mean solubility score
         camsol_vh_cdr_score   float  mean score restricted to CDR residues
         camsol_vh_fr_score    float  mean score restricted to FR residues
-        camsol_per_residue    str    per-residue scores as list of dicts:
+        camsol_per_residue           str    per-residue scores as list of dicts:
             str_pos, imgt_pos, region, aa, raw_score, smoothed_score
-        camsol_hotspot_count  int    residues with smoothed_score < -0.5
-                                     (aggregation hotspots)
+        camsol_hotspot_count         int    residues with smoothed_score < -0.5 (all regions)
+        camsol_hotspot_cdr_count     int    hotspots in CDR regions only
+        camsol_hotspot_fr_count      int    hotspots in FR regions only
     """
     empty = {
-        "camsol_score":         None,
-        "camsol_cdr_score":     None,
-        "camsol_fr_score":      None,
-        "camsol_per_residue":   str([]),
-        "camsol_hotspot_count": None,
+        "camsol_score":              None,
+        "camsol_cdr_score":          None,
+        "camsol_fr_score":           None,
+        "camsol_per_residue":        str([]),
+        "camsol_hotspot_count":      None,
+        "camsol_hotspot_cdr_count":  None,
+        "camsol_hotspot_fr_count":   None,
     }
 
     if not seq or len(seq) < 3:
@@ -1076,13 +1385,19 @@ def compute_camsol(seq: str, numbered: Optional[dict] = None) -> dict:
 
         # Aggregation hotspots: smoothed score below -0.5
         hotspot_count = sum(1 for r in results if r["smoothed_score"] < -0.5)
+        hotspot_cdr_count = sum(1 for r in results
+                                if r["smoothed_score"] < -0.5 and "CDR" in r["region"])
+        hotspot_fr_count = sum(1 for r in results
+                               if r["smoothed_score"] < -0.5 and "FR" in r["region"])
 
         return {
-            "camsol_score":         overall_score,
-            "camsol_cdr_score":     cdr_score,
-            "camsol_fr_score":      fr_score,
-            "camsol_per_residue":   str(results),
-            "camsol_hotspot_count": hotspot_count,
+            "camsol_score":             overall_score,
+            "camsol_cdr_score":         cdr_score,
+            "camsol_fr_score":          fr_score,
+            "camsol_per_residue":       str(results),
+            "camsol_hotspot_count":     hotspot_count,
+            "camsol_hotspot_cdr_count": hotspot_cdr_count,
+            "camsol_hotspot_fr_count":  hotspot_fr_count,
         }
 
     except Exception as e:
@@ -1108,6 +1423,8 @@ def score_one(
     grafted_vh:   str = "",
     grafted_vl:   str = "",
     run_structure: bool = False,
+    vh_germ_cdr1_len: Optional[int] = None,
+    vl_germ_cdr1_len: Optional[int] = None,
 ) -> dict:
     """Score a single sequence entry.
 
@@ -1172,6 +1489,17 @@ def score_one(
         row.update(
             {f"vh_{k}": v for k, v in find_liabilities(vh_seq, vh_num).items()})
 
+        # OASis per-position — compute once here, reuse for germline identity and Vernier
+        _vh_oasis_result = compute_oasis_per_position(vh_seq, vh_num, "H")
+        try:
+            _vh_oasis_detail = ast.literal_eval(
+                _vh_oasis_result.get("oasis_per_position_detail", "[]"))
+            _vh_oasis_fr = {d["imgt_pos"]: d["nmer"][0]
+                            for d in _vh_oasis_detail if "FR" in d.get("region", "")}
+        except Exception:
+            _vh_oasis_detail = []
+            _vh_oasis_fr = None
+
         # Germline identity
         # For seq 0/0r: detect closest germline from actual FR residues
         # since vh_germline in CSV is the pipeline germline (used for seq 1),
@@ -1185,11 +1513,54 @@ def score_one(
             except Exception:
                 detected_vh_germ = None
             row["vh_detected_germline_seq0"] = detected_vh_germ
-            row["vh_germline_identity"] = compute_germline_identity(
-                vh_num, detected_vh_germ, "H")
+            row["vh_germline_identity"], _vh_germ_fr = compute_germline_identity(
+                vh_num, detected_vh_germ, "H", vh_germ_cdr1_len)
+            row["vh_germline_fr_detail"] = str(
+                sorted(_vh_germ_fr.items())) if _vh_germ_fr else "[]"
+        elif seq_id in ("2", "2r", "6", "6r"):
+            # Sapiens-optimized sequences: compute germline identity against the
+            # original germline (standard) AND detect the closest germline
+            # post-hoc to check whether Sapiens drifted the FR toward a
+            # different germline than the one it was anchored to.
+            row["vh_germline_identity"], _vh_germ_fr = compute_germline_identity(
+                vh_num, vh_germline, "H", vh_germ_cdr1_len)
+            row["vh_germline_fr_detail"] = str(
+                sorted(_vh_germ_fr.items())) if _vh_germ_fr else "[]"
+            try:
+                from pipeline.step_b_germline_scoring import rank_germlines
+                vh_post_rankings = rank_germlines(
+                    vh_num["fr_residues"], "H", top_n=1)
+                vh_post_germ = vh_post_rankings[0]["germline"] if vh_post_rankings else None
+                vh_post_identity, _ = compute_germline_identity(
+                    vh_num, vh_post_germ, "H") if vh_post_germ else None
+                vh_orig_identity = row["vh_germline_identity"]
+                # Normalise germline names to gene level (strip allele) for drift check
+
+                def _gene(g):
+                    return g.split("*")[0] if g else None
+                vh_drifted = (
+                    _gene(vh_post_germ) != _gene(vh_germline)
+                ) if vh_post_germ and vh_germline else None
+                vh_delta = (
+                    round(vh_post_identity - vh_orig_identity, 4)
+                    if vh_post_identity is not None and vh_orig_identity is not None
+                    else None
+                )
+            except Exception:
+                vh_post_germ = None
+                vh_post_identity = None
+                vh_drifted = None
+                vh_delta = None
+            suffix = seq_id.rstrip("r")  # '2' or '6'
+            row[f"vh_detected_germline_post_sap_seq{suffix}"] = vh_post_germ
+            row[f"vh_detected_germline_post_sap_seq{suffix}_identity"] = vh_post_identity
+            row[f"vh_germline_drifted_seq{suffix}"] = vh_drifted
+            row[f"vh_germline_identity_delta_seq{suffix}"] = vh_delta
         else:
-            row["vh_germline_identity"] = compute_germline_identity(
-                vh_num, vh_germline, "H")
+            row["vh_germline_identity"], _vh_germ_fr = compute_germline_identity(
+                vh_num, vh_germline, "H", vh_germ_cdr1_len)
+            row["vh_germline_fr_detail"] = str(
+                sorted(_vh_germ_fr.items())) if _vh_germ_fr else "[]"
 
         # Sequence identity vs lab sequences
         row["vh_identity_vs_lab_hu"] = sequence_identity(
@@ -1199,9 +1570,8 @@ def score_one(
         row["vh_identity_vs_mouse"] = sequence_identity(
             vh_seq, mouse_vh,     "H")
 
-        # OASis per-position humanness (direct SQLite query)
-        row.update({f"vh_{k}": v for k, v in
-                    compute_oasis_per_position(vh_seq, vh_num, "H").items()})
+        # Store oasis result into row (computed earlier)
+        row.update({f"vh_{k}": v for k, v in _vh_oasis_result.items()})
 
         # CamSol intrinsic solubility
         row.update({f"vh_{k}": v for k, v in
@@ -1209,8 +1579,32 @@ def score_one(
 
         # Vernier zone — back-mutation analysis using correct grafted baseline
         if mouse_vh_num:
+            # _vh_oasis_fr already built above from the single oasis call
+            # Build mouse oasis map using same abnumber coordinates as query oasis.
+            # Pass mouse_vh_num so regions are labeled correctly.
+            # Include all positions (no FR filter) — compute_vernier only visits FR positions.
+            try:
+                _vh_mouse_oasis_raw = compute_oasis_per_position(
+                    mouse_vh, mouse_vh_num, "H")
+                _vh_mouse_oasis = ast.literal_eval(
+                    _vh_mouse_oasis_raw.get("oasis_per_position_detail", "[]"))
+                _vh_mouse_oasis_fr = {d["imgt_pos"]: d["nmer"][0]
+                                      for d in _vh_mouse_oasis}
+            except Exception:
+                _vh_mouse_oasis_fr = None
+            # Build grafted oasis map using same abnumber coordinates
+            try:
+                _vh_grafted_oasis_raw = compute_oasis_per_position(
+                    grafted_vh, mouse_vh_num, "H")
+                _vh_grafted_oasis = ast.literal_eval(
+                    _vh_grafted_oasis_raw.get("oasis_per_position_detail", "[]"))
+                _vh_grafted_oasis_fr = {d["imgt_pos"]: d["nmer"][0]
+                                        for d in _vh_grafted_oasis}
+            except Exception:
+                _vh_grafted_oasis_fr = None
             row.update({f"vh_{k}": v for k, v in compute_vernier(
-                vh_num, mouse_vh_num, grafted_vh_num, "H"
+                vh_num, mouse_vh_num, grafted_vh_num, "H",
+                _vh_oasis_fr, _vh_mouse_oasis_fr, _vh_grafted_oasis_fr
             ).items()})
 
     # ── VL features ───────────────────────────────────────────────────────────
@@ -1222,6 +1616,18 @@ def score_one(
         row.update(
             {f"vl_{k}": v for k, v in find_liabilities(vl_seq, vl_num).items()})
 
+        # OASis per-position — compute once here, reuse for germline identity and Vernier
+        _vl_oasis_result = compute_oasis_per_position(
+            vl_seq, vl_num, vl_chain_type)
+        try:
+            _vl_oasis_detail = ast.literal_eval(
+                _vl_oasis_result.get("oasis_per_position_detail", "[]"))
+            _vl_oasis_fr = {d["imgt_pos"]: d["nmer"][0]
+                            for d in _vl_oasis_detail if "FR" in d.get("region", "")}
+        except Exception:
+            _vl_oasis_detail = []
+            _vl_oasis_fr = None
+
         # Germline identity — detect for seq 0/0r, use stored for others
         if seq_id in ("0", "0r"):
             try:
@@ -1232,11 +1638,49 @@ def score_one(
             except Exception:
                 detected_vl_germ = None
             row["vl_detected_germline_seq0"] = detected_vl_germ
-            row["vl_germline_identity"] = compute_germline_identity(
-                vl_num, detected_vl_germ, vl_chain_type)
+            row["vl_germline_identity"], _vl_germ_fr = compute_germline_identity(
+                vl_num, detected_vl_germ, vl_chain_type, vl_germ_cdr1_len)
+            row["vl_germline_fr_detail"] = str(
+                sorted(_vl_germ_fr.items())) if _vl_germ_fr else "[]"
+        elif seq_id in ("2", "2r", "6", "6r"):
+            row["vl_germline_identity"], _vl_germ_fr = compute_germline_identity(
+                vl_num, vl_germline, vl_chain_type, vl_germ_cdr1_len)
+            row["vl_germline_fr_detail"] = str(
+                sorted(_vl_germ_fr.items())) if _vl_germ_fr else "[]"
+            try:
+                from pipeline.step_b_germline_scoring import rank_germlines
+                vl_post_rankings = rank_germlines(
+                    vl_num["fr_residues"], vl_chain_type, top_n=1)
+                vl_post_germ = vl_post_rankings[0]["germline"] if vl_post_rankings else None
+                vl_post_identity, _ = compute_germline_identity(
+                    vl_num, vl_post_germ, vl_chain_type) if vl_post_germ else None
+                vl_orig_identity = row["vl_germline_identity"]
+
+                def _gene(g):
+                    return g.split("*")[0] if g else None
+                vl_drifted = (
+                    _gene(vl_post_germ) != _gene(vl_germline)
+                ) if vl_post_germ and vl_germline else None
+                vl_delta = (
+                    round(vl_post_identity - vl_orig_identity, 4)
+                    if vl_post_identity is not None and vl_orig_identity is not None
+                    else None
+                )
+            except Exception:
+                vl_post_germ = None
+                vl_post_identity = None
+                vl_drifted = None
+                vl_delta = None
+            suffix = seq_id.rstrip("r")
+            row[f"vl_detected_germline_post_sap_seq{suffix}"] = vl_post_germ
+            row[f"vl_detected_germline_post_sap_seq{suffix}_identity"] = vl_post_identity
+            row[f"vl_germline_drifted_seq{suffix}"] = vl_drifted
+            row[f"vl_germline_identity_delta_seq{suffix}"] = vl_delta
         else:
-            row["vl_germline_identity"] = compute_germline_identity(
-                vl_num, vl_germline, vl_chain_type)
+            row["vl_germline_identity"], _vl_germ_fr = compute_germline_identity(
+                vl_num, vl_germline, vl_chain_type, vl_germ_cdr1_len)
+            row["vl_germline_fr_detail"] = str(
+                sorted(_vl_germ_fr.items())) if _vl_germ_fr else "[]"
 
         row["vl_identity_vs_lab_hu"] = sequence_identity(
             vl_seq, lab_hu_vl,    vl_chain_type)
@@ -1245,17 +1689,40 @@ def score_one(
         row["vl_identity_vs_mouse"] = sequence_identity(
             vl_seq, mouse_vl,     vl_chain_type)
 
-        # OASis per-position humanness (direct SQLite query)
-        row.update({f"vl_{k}": v for k, v in
-                    compute_oasis_per_position(vl_seq, vl_num, vl_chain_type).items()})
+        # Store oasis result into row (computed earlier)
+        row.update({f"vl_{k}": v for k, v in _vl_oasis_result.items()})
 
         # CamSol intrinsic solubility
         row.update({f"vl_{k}": v for k, v in
                     compute_camsol(vl_seq, vl_num).items()})
 
         if mouse_vl_num:
+            # _vl_oasis_fr already built from the single oasis call above
+            # Build mouse oasis map using same abnumber coordinates as query oasis.
+            # Pass mouse_vl_num so regions are labeled correctly.
+            # Include all positions (no FR filter) — compute_vernier only visits FR positions.
+            try:
+                _vl_mouse_oasis_raw = compute_oasis_per_position(
+                    mouse_vl, mouse_vl_num, vl_chain_type)
+                _vl_mouse_oasis = ast.literal_eval(
+                    _vl_mouse_oasis_raw.get("oasis_per_position_detail", "[]"))
+                _vl_mouse_oasis_fr = {d["imgt_pos"]: d["nmer"][0]
+                                      for d in _vl_mouse_oasis}
+            except Exception:
+                _vl_mouse_oasis_fr = None
+            # Build grafted oasis map using same abnumber coordinates
+            try:
+                _vl_grafted_oasis_raw = compute_oasis_per_position(
+                    grafted_vl, mouse_vl_num, vl_chain_type)
+                _vl_grafted_oasis = ast.literal_eval(
+                    _vl_grafted_oasis_raw.get("oasis_per_position_detail", "[]"))
+                _vl_grafted_oasis_fr = {d["imgt_pos"]: d["nmer"][0]
+                                        for d in _vl_grafted_oasis}
+            except Exception:
+                _vl_grafted_oasis_fr = None
             row.update({f"vl_{k}": v for k, v in compute_vernier(
-                vl_num, mouse_vl_num, grafted_vl_num, vl_chain_type
+                vl_num, mouse_vl_num, grafted_vl_num, vl_chain_type,
+                _vl_oasis_fr, _vl_mouse_oasis_fr, _vl_grafted_oasis_fr
             ).items()})
 
     # ── Paired Fv features ────────────────────────────────────────────────────
@@ -1333,6 +1800,30 @@ def main():
         if clone_id in benchmarks:
             clone_rows[clone_id][seq_id] = entry
 
+    # Germline reference map: which germline column to use for germline_identity per seq_id
+    # vh_germline       = pipeline top-1 germline (used for seq 1/2)
+    # vh_det_germline   = germline detected from lab Hu sequence (used for seq 3/4/5/6/7)
+    # vh_stated_germline= germline stated by the lab in the CSV (used for seq 8/9)
+    # seq 0/0r are handled separately inside score_one() via post-hoc rank_germlines()
+    GERMLINE_COL_MAP = {
+        "0":  "pipeline",   # handled post-hoc in score_one()
+        "0r": "pipeline",   # handled post-hoc in score_one()
+        "1":  "pipeline",   # seq1 IS grafted from pipeline germline
+        "2":  "pipeline",   # seq2 = seq1 + Sapiens
+        "2r": "pipeline",
+        # seq3 IS the lab-grafted seq (detected lab germline)
+        "3":  "detected",
+        "4":  "detected",   # seq4 grafted from detected lab germline
+        # seq5 = lab final, derived from seq3 (detected lab germline)
+        "5":  "detected",
+        "6":  "detected",   # seq6 = seq4 + Sapiens
+        "6r": "detected",
+        "7":  "detected",   # seq7 = seq4 + direct back-mutations
+        "8":  "stated",     # seq8 grafted from lab-stated germline
+        "9":  "stated",     # seq9 = seq8 + Sapiens
+        "9r": "stated",
+    }
+
     # Baseline mapping: which seq_id provides the grafted baseline for each seq_id
     # seq_id (being scored) → seq_id of its grafted baseline sequence
     GRAFTED_BASELINE_MAP = {
@@ -1353,6 +1844,7 @@ def main():
     }
 
     all_scores = []
+    scores_by_id = {}  # running cache: (clone_id, seq_id) → scored row
 
     for clone_id, seq_map in clone_rows.items():
         print(f"  Scoring {clone_id}...")
@@ -1382,6 +1874,41 @@ def main():
                 grafted_vh = baseline_entry.get("vh_sequence", "") or ""
                 grafted_vl = baseline_entry.get("vl_sequence", "") or ""
 
+            # ── Resolve correct germline reference for germline_identity ─────────
+            # Each seq_id must be compared against the germline it was actually
+            # derived from, not always the pipeline germline.
+            germ_col = GERMLINE_COL_MAP.get(seq_id, "pipeline")
+            if germ_col == "pipeline":
+                vh_germ_ref = entry.get("vh_germline", "")
+                vl_germ_ref = entry.get("vl_germline", "")
+            elif germ_col == "detected":
+                vh_germ_ref = entry.get("vh_det_germline", "")
+                vl_germ_ref = entry.get("vl_det_germline", "")
+            elif germ_col == "stated":
+                vh_germ_ref = entry.get("vh_stated_germline", "")
+                vl_germ_ref = entry.get("vl_stated_germline", "")
+            else:
+                vh_germ_ref = entry.get("vh_germline", "")
+                vl_germ_ref = entry.get("vl_germline", "")
+
+            # Germline CDR1 lengths for CDR1-mismatch guard in compute_germline_identity.
+            # seq1 CDR1 = pipeline germline CDR1 len; seq3 CDR1 = detected germline CDR1 len.
+            # Use scores_by_id cache (seq1/seq3 are scored before seq2/seq6).
+            _s1 = scores_by_id.get((clone_id, "1"), {})
+            _s3 = scores_by_id.get((clone_id, "3"), {})
+            _pipe_vh_cdr1 = len(_s1.get("vh_cdr1_sequence", "") or "")
+            _pipe_vl_cdr1 = len(_s1.get("vl_cdr1_sequence", "") or "")
+            _det_vh_cdr1 = len(_s3.get("vh_cdr1_sequence", "") or "")
+            _det_vl_cdr1 = len(_s3.get("vl_cdr1_sequence", "") or "")
+            _s8 = scores_by_id.get((clone_id, "8"), {})
+            _stat_vh_cdr1 = len(_s8.get("vh_cdr1_sequence", "") or "")
+            _stat_vl_cdr1 = len(_s8.get("vl_cdr1_sequence", "") or "")
+            _vh_germ_cdr1 = (_pipe_vh_cdr1 if germ_col == "pipeline"
+                             else _det_vh_cdr1 if germ_col == "detected"
+                             else _stat_vh_cdr1 if germ_col == "stated" else None) or None
+            _vl_germ_cdr1 = (_pipe_vl_cdr1 if germ_col == "pipeline"
+                             else _det_vl_cdr1 if germ_col == "detected"
+                             else _stat_vl_cdr1 if germ_col == "stated" else None) or None
             scores = score_one(
                 clone_id=clone_id,
                 seq_id=seq_id,
@@ -1395,13 +1922,16 @@ def main():
                 lab_hu_vl=bench.get("hu_vl", ""),
                 lab_final_vh=bench.get("final_vh", ""),
                 lab_final_vl=bench.get("final_vl", ""),
-                vh_germline=entry.get("vh_germline", ""),
-                vl_germline=entry.get("vl_germline", ""),
+                vh_germline=vh_germ_ref,
+                vl_germline=vl_germ_ref,
                 grafted_vh=grafted_vh,
                 grafted_vl=grafted_vl,
                 run_structure=args.structure,
+                vh_germ_cdr1_len=_vh_germ_cdr1,
+                vl_germ_cdr1_len=_vl_germ_cdr1,
             )
             all_scores.append(scores)
+            scores_by_id[(clone_id, seq_id)] = scores
 
     if not all_scores:
         print("No sequences scored.")

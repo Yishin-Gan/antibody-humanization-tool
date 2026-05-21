@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Antibody Humanization Advisor</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='input.css') }}?v=3">
+</head>
+<body>
+<header class="topbar">
+  <h1>Antibody Humanization Advisor</h1>
+  <p class="sub">Mouse antibody humanization &mdash; humanness, mutation analysis, decision support.</p>
+</header>
+
+<form id="run-form" method="post" action="/run">
+
+  <!-- ── Mouse sequences ──────────────────────────────────────────────────── -->
+  <section class="card">
+    <h2>Mouse sequence <span class="req">required</span></h2>
+
+    <div class="field">
+      <label for="mouse_vh">VH sequence (amino acids, FASTA or raw)</label>
+      <textarea id="mouse_vh" name="mouse_vh" rows="4" required
+        placeholder="Paste mouse VH amino acid sequence here..."></textarea>
+      <div class="hint" id="vh-hint"></div>
+    </div>
+
+    <div class="field">
+      <label for="mouse_vl">VL sequence</label>
+      <textarea id="mouse_vl" name="mouse_vl" rows="4" required
+        placeholder="Paste mouse VL amino acid sequence here..."></textarea>
+      <div class="hint" id="vl-hint"></div>
+    </div>
+
+    <div class="field inline">
+      <label class="static">VL chain type:</label>
+      <label><input type="radio" name="vl_chain_type" value="auto" checked> Auto-detect</label>
+      <label><input type="radio" name="vl_chain_type" value="K"> Kappa</label>
+      <label><input type="radio" name="vl_chain_type" value="L"> Lambda</label>
+      <span id="chain-detect" class="hint"></span>
+    </div>
+  </section>
+
+  <!-- ── Processing modes ─────────────────────────────────────────────────── -->
+  <section class="card">
+    <h2>Processing modes <span class="req">select at least one</span></h2>
+
+    <div class="mode-row">
+      <input type="checkbox" id="mode-pipeline" name="modes" value="pipeline" checked>
+      <div>
+        <label for="mode-pipeline" class="mode-title"><span class="dot dot-pipeline"></span>Pipeline selected germline</label>
+        <p class="mode-desc">The pipeline picks the best-matching human germline using
+          <code>rank_germlines()</code>, grafts mouse CDRs onto it, and then runs Sapiens
+          anchored to that germline. <em>Equivalent to seq2 in the legacy pipeline.</em></p>
+      </div>
+    </div>
+
+    <div class="mode-row">
+      <input type="checkbox" id="mode-preferred" name="modes" value="preferred">
+      <div>
+        <label for="mode-preferred" class="mode-title"><span class="dot dot-preferred"></span>Preferred germline</label>
+        <p class="mode-desc">You specify the target germline; the pipeline grafts onto it
+          and runs Sapiens anchored to your choice. <em>Equivalent to seq6.</em></p>
+        <div class="sub-fields">
+          <div class="field">
+            <label for="preferred_germ_vh">VH germline (e.g. <code>IGHV1-69*02</code>)</label>
+            <input type="text" id="preferred_germ_vh" name="preferred_germ_vh"
+              data-validate-germline="H" autocomplete="off">
+            <div class="hint" id="pref-vh-hint"></div>
+          </div>
+          <div class="field">
+            <label for="preferred_germ_vl">VL germline (e.g. <code>IGKV1-33*01</code>)</label>
+            <input type="text" id="preferred_germ_vl" name="preferred_germ_vl"
+              data-validate-germline="auto" autocomplete="off">
+            <div class="hint" id="pref-vl-hint"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mode-row">
+      <input type="checkbox" id="mode-sapiens" name="modes" value="sapiens">
+      <div>
+        <label for="mode-sapiens" class="mode-title"><span class="dot dot-sapiens"></span>Sapiens fully controlled</label>
+        <p class="mode-desc">Sapiens runs directly on the mouse sequence with no germline
+          anchoring. Maximally humanised but carries CDR loop conformational risk from
+          Vernier changes. <em>Equivalent to seq0.</em></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Lab reference ────────────────────────────────────────────────────── -->
+  <section class="card">
+    <h2>Lab reference <span class="opt">optional</span></h2>
+    <p class="desc">Provide your existing humanised sequence and germline as a benchmark.
+      <strong>No Sapiens is run on lab data.</strong> If any lab field is filled, all six must be.</p>
+
+    <div class="sub-fields two-col">
+      <div class="field">
+        <label for="lab_hu_vh">Lab Hu VH <small>(seq3 equivalent &mdash; grafted baseline)</small></label>
+        <textarea id="lab_hu_vh" name="lab_hu_vh" rows="3"></textarea>
+      </div>
+      <div class="field">
+        <label for="lab_hu_vl">Lab Hu VL</label>
+        <textarea id="lab_hu_vl" name="lab_hu_vl" rows="3"></textarea>
+      </div>
+      <div class="field">
+        <label for="lab_germ_vh">Lab VH germline</label>
+        <input type="text" id="lab_germ_vh" name="lab_germ_vh"
+          data-validate-germline="H" autocomplete="off">
+        <div class="hint" id="lab-vh-hint"></div>
+      </div>
+      <div class="field">
+        <label for="lab_germ_vl">Lab VL germline</label>
+        <input type="text" id="lab_germ_vl" name="lab_germ_vl"
+          data-validate-germline="auto" autocomplete="off">
+        <div class="hint" id="lab-vl-hint"></div>
+      </div>
+      <div class="field">
+        <label for="lab_final_vh">Lab final VH <small>(seq5 equivalent &mdash; final humanised)</small></label>
+        <textarea id="lab_final_vh" name="lab_final_vh" rows="3"></textarea>
+      </div>
+      <div class="field">
+        <label for="lab_final_vl">Lab final VL</label>
+        <textarea id="lab_final_vl" name="lab_final_vl" rows="3"></textarea>
+      </div>
+    </div>
+    <input type="checkbox" id="mode-lab" name="modes" value="lab" style="display:none">
+  </section>
+
+  <!-- ── Options ──────────────────────────────────────────────────────────── -->
+  <section class="card">
+    <h2>Options</h2>
+    <label class="cb"><input type="checkbox" id="structure" name="structure">
+      Include structure prediction (ABodyBuilder2) <small>&mdash; adds ~2 min</small></label>
+  </section>
+
+  <div class="submit-row">
+    <button type="submit" id="run-btn">&#9654; Run humanization</button>
+    <span class="hint">Estimated time: ~30s&ndash;2 min (without structure).</span>
+  </div>
+
+  <!-- ── Progress overlay (shown after submit) ────────────────────────────── -->
+  <div id="progress" class="progress-overlay" hidden>
+    <div class="progress-box">
+      <h3>Running pipeline&hellip;</h3>
+      <div class="stage" data-stage="numbering">⏳ Numbering &amp; CDR detection</div>
+      <div class="stage" data-stage="germline">… Germline selection</div>
+      <div class="stage" data-stage="graft">… CDR grafting</div>
+      <div class="stage" data-stage="sapiens">… Sapiens humanization</div>
+      <div class="stage" data-stage="score">… Scoring &amp; metrics</div>
+      <div class="stage" data-stage="structure">… Structure prediction (optional)</div>
+      <p class="hint" style="margin-top:1em">Page will redirect to the report when ready.</p>
+    </div>
+  </div>
+
+</form>
+
+<script src="{{ url_for('static', filename='input.js') }}?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Antibody Humanization — Analysis Report v5</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0c10;--s1:#111318;--s2:#191d24;--s3:#21262f;
+  --bd:#2d3340;--bd2:#3d4557;
+  --t1:#f0f4ff;--t2:#8b98b8;--t3:#556080;
+  --blue:#4f8ef7;--teal:#38d9c0;--amber:#f5a623;--red:#f25f5c;
+  --purple:#9b7fe8;--green:#4ade80;--pink:#f472b6;--orange:#fb923c;
+  --seq0:#c084fc;--seq2:#4f8ef7;--seq5:#f5a623;--seq6:#38d9c0;
+  --cdr-bg:rgba(155,127,232,0.12);--cdr-bd:#6d5fa6;
+  --mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--t1);font-family:var(--sans);min-height:100vh;overflow-x:hidden}
+.app{display:block;min-height:100vh}
+.topbar{display:none}
+.sidebar{position:fixed;top:0;left:0;width:230px;height:100vh;background:var(--s1);border-right:1px solid var(--bd);padding:.75rem 0;overflow-y:auto;display:flex;flex-direction:column;z-index:100}
+.main{margin-left:230px;padding:1.5rem 2rem;min-height:100vh;box-sizing:border-box}
+.nav-lbl{font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);padding:.6rem .75rem .25rem;font-family:var(--mono)}
+.nav-btn{display:block;width:calc(100% - 12px);text-align:left;padding:.45rem .75rem;background:none;border:none;cursor:pointer;color:var(--t2);font-size:.88rem;font-family:var(--sans);font-weight:500;transition:all .12s;border-radius:4px;margin:1px 6px}
+.nav-btn:hover{color:var(--t1);background:var(--s2)}
+.nav-btn.active{color:var(--blue);background:rgba(79,142,247,.1)}
+.clone-wrap{padding:.65rem .75rem;border-top:none;margin-top:0}
+.clone-lbl{font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);padding-bottom:.4rem;font-family:var(--mono)}
+.clone-sel{width:100%;background:var(--s2);border:1px solid var(--bd);color:var(--t1);padding:.4rem .6rem;border-radius:5px;font-size:.78rem;font-family:var(--mono);cursor:pointer}
+.clone-sel:focus{outline:none;border-color:var(--blue)}
+.section{display:none}.section.active{display:block}
+.sec-hdr{margin-bottom:1.1rem;padding-bottom:.65rem;border-bottom:1px solid var(--bd)}
+.sec-tag{font-size:1rem;font-family:var(--mono);color:var(--blue);letter-spacing:.12em;text-transform:uppercase;margin-bottom:.25rem;font-weight:700}
+.sec-title{font-size:1.5rem;font-weight:700}
+.sec-desc{font-size:1rem;color:var(--t2);margin-top:.3rem;line-height:1.6}
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:7px;padding:.9rem 1rem;margin-bottom:.85rem}
+.card-title{font-size:1rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.75rem}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-bottom:.85rem}
+.stat{background:var(--s2);border-radius:6px;padding:.65rem .85rem;border:1px solid var(--bd)}
+.stat-lbl{font-size:.6rem;color:var(--t3);font-family:var(--mono);margin-bottom:.2rem;line-height:1.3}
+.stat-val{font-size:1.05rem;font-weight:600;font-family:var(--mono)}
+.stat-sub{font-size:.6rem;color:var(--t3);margin-top:.1rem;font-family:var(--mono)}
+.ftable{width:100%;border-collapse:collapse;font-size:.73rem}
+.ftable th{text-align:left;padding:.5rem .65rem;font-size:.78rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--bd);white-space:nowrap}
+.ftable td{padding:.45rem .65rem;font-size:.85rem;border-bottom:1px solid rgba(45,51,64,.4);font-family:var(--mono);vertical-align:top}
+.ftable tr:last-child td{border-bottom:none}
+.ftable tr:hover td{background:rgba(25,29,36,.6)}
+.sec-row td{background:var(--s2)!important;font-family:var(--sans);font-size:.62rem;color:var(--t3);padding:.28rem .65rem;border-bottom:1px solid var(--bd)!important;text-transform:uppercase;letter-spacing:.05em}
+.badge{display:inline-block;padding:1px 7px;border-radius:3px;font-size:.62rem;font-family:var(--mono);font-weight:500}
+.b2{background:rgba(79,142,247,.15);color:var(--blue)}.b6{background:rgba(56,217,192,.15);color:var(--teal)}.bm{background:rgba(100,110,130,.12);color:var(--t3)}
+.warn-row td{background:rgba(245,166,35,.04)!important}.zero-row td{color:var(--t3)!important}.s5b{color:var(--amber);font-size:.62rem}
+.dpos{color:var(--green)}.dneg{color:var(--red)}.dna{color:var(--t3)}
+.gtable{width:100%;border-collapse:collapse;font-size:.73rem}
+.gtable th{text-align:left;padding:.5rem .65rem;font-size:.75rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--bd);white-space:nowrap}
+.gtable td{padding:.45rem .65rem;font-size:.85rem;border-bottom:1px solid rgba(45,51,64,.4);font-family:var(--mono);vertical-align:middle}
+.gtable tr:last-child td{border-bottom:none}
+.gtable tr:hover td{background:rgba(25,29,36,.5)}
+.bar-group{margin-bottom:.65rem}.bar-group-lbl{font-size:.62rem;color:var(--t3);font-family:var(--mono);margin-bottom:4px}
+.bar-row{display:flex;align-items:center;gap:.5rem;margin-bottom:2px}
+.bar-lbl{width:64px;font-size:.62rem;font-family:var(--mono);flex-shrink:0;text-align:right}
+.bar-track{flex:1;background:var(--s2);border-radius:2px;height:4px;overflow:hidden}
+.bar-fill{height:100%;border-radius:2px}.bar-val{width:40px;font-size:.62rem;font-family:var(--mono);flex-shrink:0}
+.bar-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem .75rem}
+.level-card{background:var(--s1);border:1px solid var(--bd);border-radius:7px;padding:.85rem 1rem;margin-bottom:.85rem}
+.level-hdr{display:flex;align-items:baseline;gap:.75rem;margin-bottom:.7rem;padding-bottom:.5rem;border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.level-tag{font-size:.85rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.08em}
+.level-title{font-size:1.1rem;font-weight:600}
+.kv-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem .65rem}
+.kv{background:var(--s2);border-radius:4px;padding:.45rem .6rem}
+.kv-lbl{font-size:.78rem;color:var(--t3);font-family:var(--mono);margin-bottom:.15rem;line-height:1.3}
+.kv-val{font-size:1rem;font-weight:500;font-family:var(--mono)}
+.kv-val.good{color:var(--green)}.kv-val.warn{color:var(--amber)}.kv-val.bad{color:var(--red)}.kv-val.neu{color:var(--t2)}
+.seq-wrap{overflow-x:auto;padding-bottom:.5rem}.seq-block{min-width:max-content}
+.seq-ruler-row{display:flex;padding-left:60px;min-width:max-content;margin-bottom:2px}
+.ruler-aa{width:12px;flex-shrink:0;font-size:.55rem;font-family:var(--mono);color:var(--t3);text-align:center;line-height:1}
+.ruler-aa.tick{color:var(--t2);border-bottom:1px solid var(--bd)}
+.seq-line{display:flex;align-items:flex-start;margin-bottom:1px;min-width:max-content}
+.seq-name{width:60px;flex-shrink:0;font-size:.78rem;font-family:var(--mono);padding-top:2px}
+.region-block{display:inline-flex}
+.region-block.CDR1,.region-block.CDR2,.region-block.CDR3{background:var(--cdr-bg);outline:1px solid var(--cdr-bd);border-radius:2px;padding:0 1px;margin:0 1px}
+.aa{width:12px;flex-shrink:0;font-size:.82rem;font-family:var(--mono);text-align:center;line-height:1.7;cursor:default}
+.aa:hover{background:rgba(255,255,255,.07);border-radius:1px}
+.aa.match{color:var(--t2)}.aa.diff2{color:var(--blue);font-weight:600}.aa.diff6{color:var(--teal);font-weight:600}.aa.diff-both{color:var(--amber);font-weight:600}
+.vtable{width:100%;border-collapse:collapse;font-size:.73rem}
+.vtable th{padding:.5rem .6rem;font-size:.78rem;font-family:var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+.vtable td{padding:.45rem .6rem;font-size:.85rem;border-bottom:1px solid rgba(45,51,64,.35);font-family:var(--mono)}
+.vtable tr:last-child td{border-bottom:none}
+.vtable tr:hover td{background:rgba(25,29,36,.5)}
+.vtable .conflict-row td{background:rgba(242,95,92,.05)!important}
+.am{color:var(--green);font-weight:600}.ai{color:var(--t3);font-style:italic}.an{color:var(--t3)}.ah{color:var(--red);font-weight:600}.ao{color:var(--purple);font-weight:600}.ab{color:var(--teal);font-weight:600}
+.note-c{color:var(--red)}.note-w{color:var(--amber)}.note-ok{color:var(--t3)}
+.legend{display:flex;flex-wrap:wrap;gap:.5rem 1rem;font-size:.85rem;color:var(--t2);margin:.6rem 0;align-items:center}
+.ld{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:3px;vertical-align:middle}
+.notice{background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.3);border-radius:5px;padding:.6rem .85rem;font-size:.68rem;color:var(--orange);font-family:var(--sans);margin-bottom:.85rem;line-height:1.5}
+::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+.seq-def{padding:.65rem .75rem;border-bottom:1px solid var(--bd);font-size:.62rem;font-family:var(--mono);color:var(--t3);line-height:1.7}
+.seq-def span{display:block}
+.seq-def .s2{color:var(--seq2)}.seq-def .s5{color:var(--seq5)}.seq-def .s6{color:var(--seq6)}.seq-def .s0{color:var(--seq0)}
+</style>
+</head>
+<body>
+<div class="app">
+<nav class="sidebar">
+  <div style="padding:.75rem .75rem .4rem;border-bottom:1px solid var(--bd)">
+    <div style="font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--blue);margin-bottom:.5rem;font-family:var(--sans)">Antibody Humanization</div>
+  </div>
+  <div class="seq-def">
+    <span class="s2"><span style="font-weight:600">Pipeline Candidate</span><span style="color:var(--t3);font-size:.58rem;margin-left:4px">(seq2)</span></span>
+    <span class="s6"><span style="font-weight:600">Lab-Germline Candidate</span><span style="color:var(--t3);font-size:.58rem;margin-left:4px">(seq6)</span></span>
+    <span class="s5"><span style="font-weight:600">Lab Reference</span><span style="color:var(--t3);font-size:.58rem;margin-left:4px">(seq5)</span></span>
+    <span class="s0"><span style="font-weight:600">Mouse-Optimized</span><span style="color:var(--t3);font-size:.58rem;margin-left:4px">(seq0)</span></span>
+  </div>
+  <div class="clone-wrap">
+    <div class="clone-lbl">Clone</div>
+    <select class="clone-sel" id="cloneSelect" onchange="updateClone()">
+      <option>8C11</option><option>25A1</option><option>2E8</option>
+      <option>Ab21</option><option>10H5</option><option>28E07</option>
+      <option>3C3</option><option>1G8</option><option>2B6</option>
+    </select>
+  </div>
+  <div style="border-top:1px solid var(--bd);padding:.5rem 0 .25rem">
+    <div class="nav-lbl">Sections</div>
+    <button class="nav-btn active" onclick="showSec('features')">Features &amp; Metrics</button>
+    <button class="nav-btn" onclick="showSec('germline')">Germline Identity</button>
+    <button class="nav-btn" onclick="showSec('sequences')">Sequence Viewer</button>
+    <button class="nav-btn" onclick="showSec('vernier')">Mutable Positions</button>
+  </div>
+</nav>
+<main class="main">
+
+<!-- FEATURES -->
+<div class="section active" id="features">
+  <div class="sec-hdr">
+    <div class="sec-tag">Features &amp; Metrics</div>
+    <div class="sec-title" id="feat-title">Clone</div>
+    <div class="sec-desc">Pipeline Candidate (seq2) vs Lab Reference (seq5) vs Lab-Germline Candidate (seq6). Winner = best of seq2/seq6.</div>
+  </div>
+  <div class="card"><div class="card-title">OASis humanness</div><div class="bar-grid" id="oasis-bars"></div></div>
+  <div class="card"><div class="card-title">All features</div>
+    <table class="ftable"><thead><tr>
+      <th>Feature</th><th style="color:var(--seq2)">Pipeline</th><th style="color:var(--seq6)">Lab-Germline</th><th style="color:var(--seq5)">Lab Ref</th>
+      <th>&Delta; s2&rarr;s5</th><th>&Delta; s6&rarr;s5</th><th>Winner</th><th>s5&gt;?</th><th style="max-width:180px">Note</th>
+    </tr></thead><tbody id="feat-tbody"></tbody></table>
+  </div>
+</div>
+
+<!-- GERMLINE IDENTITY -->
+<div class="section" id="germline">
+  <div class="sec-hdr">
+    <div class="sec-tag">Germline Identity</div>
+    <div class="sec-title" id="germ-title">Clone</div>
+    <div class="sec-desc">Fraction of FR positions matching the reference human germline.</div>
+  </div>
+  <div class="notice" id="germ-notice" style="display:none"></div>
+  <div class="card"><div class="card-title">VH germline identity per sequence</div><table class="gtable" id="germ-vh-table"></table></div>
+  <div class="card"><div class="card-title">VL germline identity per sequence</div><table class="gtable" id="germ-vl-table"></table></div>
+  <div class="card"><div class="card-title">Germline selection &mdash; pipeline vs lab</div><div id="germ-selection"></div></div>
+  <div class="card">
+    <div class="card-title">FR sequence comparison</div>
+    <div id="germ-fr-comp"></div>
+  </div>
+</div>
+
+
+<!-- SEQUENCES -->
+<div class="section" id="sequences">
+  <div class="sec-hdr">
+    <div class="sec-tag">Sequence Viewer</div>
+    <div class="sec-title" id="seq-title">Clone</div>
+    <div class="sec-desc">seq2 / seq5 / seq6 aligned. CDR regions have purple background.</div>
+  </div>
+  <div class="legend">
+    <span><span class="ld" style="background:var(--blue)"></span>seq2 differs from seq5</span>
+    <span><span class="ld" style="background:var(--teal)"></span>seq6 differs from seq5</span>
+    <span><span class="ld" style="background:var(--amber)"></span>both differ from seq5</span>
+    <span><span style="display:inline-block;width:20px;height:8px;background:var(--cdr-bg);border:1px solid var(--cdr-bd);border-radius:2px;margin-right:4px;vertical-align:middle"></span>CDR</span>
+  </div>
+  <div class="card"><div class="card-title">VH</div><div id="seq-vh"></div></div>
+  <div class="card"><div class="card-title">VL</div><div id="seq-vl"></div></div>
+</div>
+
+<!-- MUTABLE POSITIONS -->
+<div class="section" id="vernier">
+  <div class="sec-hdr">
+    <div class="sec-tag">Mutable Positions</div>
+    <div class="sec-title" id="vern-title">Clone</div>
+    <div class="sec-desc">All FR positions where mouse &ne; germline (mutable). Vernier zone positions shown first, then remaining FR positions.</div>
+  </div>
+  <div class="legend">
+    <span><span class="am">A</span> back-mutated to mouse</span>
+    <span><span class="ai">A*</span> Sapiens kept mouse (seq0)</span>
+    <span><span class="an">A&deg;</span> not mutable</span>
+    <span><span class="ah">A</span> humanized</span>
+    <span><span class="ao">A</span> third residue</span>
+    <span><span class="ao">A!</span> Sapiens changed non-mutable</span>
+    <span style="color:var(--red)">&bull; row</span> = conflict
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+    <div class="card"><div class="card-title">VH &mdash; Vernier Zone</div><div id="vern-vh"></div></div>
+    <div class="card"><div class="card-title">VL &mdash; Vernier Zone</div><div id="vern-vl"></div></div>
+    <div class="card"><div class="card-title">VH &mdash; Non-Vernier FR</div><div id="mut-vh-non"></div></div>
+    <div class="card"><div class="card-title">VL &mdash; Non-Vernier FR</div><div id="mut-vl-non"></div></div>
+  </div>
+  <div class="card" id="mut-notes" style="margin-top:.85rem"><div class="card-title">Position Notes</div><div id="mut-notes-body"></div></div>
+</div>
+
+</main>
+</div>
+
+<script>
+const ED=__ED_JSON__;
+const DATA=ED.DATA,VERN=ED.VERN,RPT=ED.RPT,MUTABLE=ED.MUTABLE,DRIFT=ED.DRIFT;
+const CLONES=['8C11','25A1','2E8','Ab21','10H5','28E07','3C3','1G8','2B6'];
+let curClone='8C11',curSec='features';
+
+const pct=(v,d=1)=>v!=null?(v*100).toFixed(d)+'%':'—';
+const f3=v=>v!=null?v.toFixed(3):'—';
+const f2=v=>v!=null?v.toFixed(2):'—';
+const ivf=v=>v!=null?String(v):'—';
+
+function delt(v,isPct){
+  if(v==null)return'<span class="dna">—</span>';
+  const s=(v>=0?'+':'')+(isPct?(v*100).toFixed(1)+'%':v.toFixed(3));
+  return'<span class="'+(Math.abs(v)<0.001?'dna':v>0?'dpos':'dneg')+'">'+s+'</span>';
+}
+function winner(v2,v6,h){
+  if(h===null)return null;
+  var p=[{v:v2,n:'seq2'},{v:v6,n:'seq6'}].filter(function(x){return x.v!=null&&!isNaN(x.v);});
+  if(!p.length)return null;
+  return(h?p.reduce(function(a,c){return c.v>a.v?c:a;}):p.reduce(function(a,c){return c.v<a.v?c:a;})).n;
+}
+function s5Beats(v2,v6,v5,h){
+  if(h===null||v5==null)return false;
+  var best=h?Math.max(v2!=null?v2:-Infinity,v6!=null?v6:-Infinity):Math.min(v2!=null?v2:Infinity,v6!=null?v6:Infinity);
+  return h?v5>best+0.001:v5<best-0.001;
+}
+
+var FSECS=[
+  {lbl:'Humanness — OASis 9-mer prevalence (higher = more human)',rows:[
+    {k:'OASis VH',get:function(d){return d.oa_vh},h:true,fmt:pct,note:'Overall VH (FR+CDR).'},
+    {k:'OASis FR VH',get:function(d){return d.oa_fr_vh},h:true,fmt:pct,note:'FR only — most discriminating.'},
+    {k:'OASis CDR VH',get:function(d){return d.oa_cdr_vh},h:true,fmt:pct,note:'CDR only.'},
+    {k:'OASis VL',get:function(d){return d.oa_vl},h:true,fmt:pct,note:'Overall VL.'},
+    {k:'OASis FR VL',get:function(d){return d.oa_fr_vl},h:true,fmt:pct,note:'FR only VL.'},
+    {k:'OASis CDR VL',get:function(d){return d.oa_cdr_vl},h:true,fmt:pct,note:'CDR only VL.'},
+  ]},
+  {lbl:'Structure confidence — ABodyBuilder2 (higher = more confident)',rows:[
+    {k:'Conf mean VH',get:function(d){return d.cf_vh},h:true,fmt:f2,note:'Mean across all VH residues.'},
+    {k:'Conf FR VH',get:function(d){return d.cf_fr_vh},h:true,fmt:f2,note:'FR region mean VH.'},
+    {k:'Conf CDR VH',get:function(d){return d.cf_cdr_vh},h:true,fmt:f2,note:'CDR pooled mean VH.'},
+    {k:'Conf mean VL',get:function(d){return d.cf_vl},h:true,fmt:f2,note:'Mean across all VL residues.'},
+    {k:'Conf FR VL',get:function(d){return d.cf_fr_vl},h:true,fmt:f2,note:'FR region mean VL.'},
+    {k:'Conf CDR VL',get:function(d){return d.cf_cdr_vl},h:true,fmt:f2,note:'CDR pooled mean VL.'},
+    {k:'Conf min VH',get:function(d){return d.cf_min_vh},h:true,fmt:f2,note:'Single worst VH residue.'},
+    {k:'Conf min VL',get:function(d){return d.cf_min_vl},h:true,fmt:f2,note:'Single worst VL residue.'},
+    {k:'Conf CDR1 VH',get:function(d){return d.cf_cdr1_vh},h:true,fmt:f2,note:'CDR1 VH.'},
+    {k:'Conf CDR2 VH',get:function(d){return d.cf_cdr2_vh},h:true,fmt:f2,note:'CDR2 VH.'},
+    {k:'Conf CDR3 VH',get:function(d){return d.cf_cdr3_vh},h:true,fmt:f2,note:'CDR3 VH — key risk for long loops.'},
+    {k:'Conf CDR1 VL',get:function(d){return d.cf_cdr1_vl},h:true,fmt:f2,note:'CDR1 VL.'},
+    {k:'Conf CDR2 VL',get:function(d){return d.cf_cdr2_vl},h:true,fmt:f2,note:'CDR2 VL.'},
+    {k:'Conf CDR3 VL',get:function(d){return d.cf_cdr3_vl},h:true,fmt:f2,note:'CDR3 VL.'},
+  ]},
+  {lbl:'Solubility — CamSol intrinsic (higher = more soluble)',rows:[
+    {k:'CamSol VH',get:function(d){return d.cs_vh},h:true,fmt:f3,note:'Overall VH solubility.'},
+    {k:'CamSol FR VH',get:function(d){return d.cs_fr_vh},h:true,fmt:f3,note:'FR region VH.'},
+    {k:'CamSol CDR VH',get:function(d){return d.cs_cdr_vh},h:true,fmt:f3,note:'CDR VH — fixed by mouse CDR.'},
+    {k:'CamSol VL',get:function(d){return d.cs_vl},h:true,fmt:f3,note:'Overall VL.'},
+    {k:'CamSol FR VL',get:function(d){return d.cs_fr_vl},h:true,fmt:f3,note:'FR region VL.'},
+    {k:'CamSol CDR VL',get:function(d){return d.cs_cdr_vl},h:true,fmt:f3,note:'CDR VL — fixed by mouse CDR.'},
+    {k:'Hotspots VH',get:function(d){return d.hs_vh},h:false,fmt:ivf,note:'Residues with smoothed CamSol < -0.5.'},
+    {k:'Hotspots FR VH',get:function(d){return d.hs_fr_vh},h:false,fmt:ivf,note:'FR hotspots VH.'},
+    {k:'Hotspots CDR VH',get:function(d){return d.hs_cdr_vh},h:false,fmt:ivf,noZero:true,note:'CDR hotspots — constant.'},
+    {k:'Hotspots VL',get:function(d){return d.hs_vl},h:false,fmt:ivf,note:'Total VL hotspots.'},
+    {k:'Hotspots FR VL',get:function(d){return d.hs_fr_vl},h:false,fmt:ivf,note:'FR hotspots VL.'},
+    {k:'Hotspots CDR VL',get:function(d){return d.hs_cdr_vl},h:false,fmt:ivf,noZero:true,note:'CDR hotspots VL — constant.'},
+  ]},
+  {lbl:'Physicochemical',rows:[
+    {k:'pI Fv',get:function(d){return d.pi},h:null,fmt:f2,note:'Isoelectric point.'},
+    {k:'Net charge Fv',get:function(d){return d.ch},h:null,fmt:f2,note:'Net charge at pH 7.'},
+  ]},
+  {lbl:'FR Liabilities (lower = fewer risks)',rows:[
+    {k:'Deamid FR VH',get:function(d){return d.l.vh_df},h:false,fmt:ivf,note:'NG/NS/NT motifs in VH FR.'},
+    {k:'Deamid FR VL',get:function(d){return d.l.vl_df},h:false,fmt:ivf,note:'VL FR deamidation.'},
+    {k:'Oxidation FR VH',get:function(d){return d.l.vh_of},h:false,fmt:ivf,note:'M/W in VH FR.'},
+    {k:'Oxidation FR VL',get:function(d){return d.l.vl_of},h:false,fmt:ivf,note:'VL FR oxidation.'},
+    {k:'Isomer FR VH',get:function(d){return d.l.vh_if},h:false,fmt:ivf,note:'DG/DS in VH FR.'},
+    {k:'Isomer FR VL',get:function(d){return d.l.vl_if},h:false,fmt:ivf,note:'VL FR isomerization.'},
+  ]},
+  {lbl:'CDR Liabilities — intrinsic, identical across all pipeline sequences',rows:[
+    {k:'Deamid CDR VH',get:function(d){return d.l.vh_dc},h:false,fmt:ivf,noZero:true,note:'Fixed by CDR sequence.'},
+    {k:'Oxidation CDR VH',get:function(d){return d.l.vh_oc},h:false,fmt:ivf,noZero:true,note:'CDR-intrinsic.'},
+    {k:'Deamid CDR VL',get:function(d){return d.l.vl_dc},h:false,fmt:ivf,noZero:true,note:'VL CDR deamidation.'},
+    {k:'Oxidation CDR VL',get:function(d){return d.l.vl_oc},h:false,fmt:ivf,noZero:true,note:'VL CDR oxidation.'},
+  ]},
+];
+
+// ── Features ──
+function renderFeatures(){
+  var c=curClone,d2=DATA[c]['2'],d5=DATA[c]['5'],d6=DATA[c]['6'],d0=DATA[c]['0'];
+  document.getElementById('feat-title').textContent=c;
+  var BROWS=[
+    {l:'VH Overall',s2:d2.oa_vh,s6:d6.oa_vh,s0:d0.oa_vh,s5:d5.oa_vh},
+    {l:'VH FR Only',s2:d2.oa_fr_vh,s6:d6.oa_fr_vh,s0:d0.oa_fr_vh,s5:d5.oa_fr_vh},
+    {l:'VH CDR Only',s2:d2.oa_cdr_vh,s6:d6.oa_cdr_vh,s0:d0.oa_cdr_vh,s5:d5.oa_cdr_vh},
+    {l:'VH Germline',s2:d2.g_vh,s6:d6.g_vh,s0:d0.g_vh,s5:d5.g_vh},
+    {l:'VL Overall',s2:d2.oa_vl,s6:d6.oa_vl,s0:d0.oa_vl,s5:d5.oa_vl},
+    {l:'VL FR Only',s2:d2.oa_fr_vl,s6:d6.oa_fr_vl,s0:d0.oa_fr_vl,s5:d5.oa_fr_vl},
+    {l:'VL CDR Only',s2:d2.oa_cdr_vl,s6:d6.oa_cdr_vl,s0:d0.oa_cdr_vl,s5:d5.oa_cdr_vl},
+    {l:'VL Germline',s2:d2.g_vl,s6:d6.g_vl,s0:d0.g_vl,s5:d5.g_vl},
+  ];
+  document.getElementById('oasis-bars').innerHTML=BROWS.map(function(b){return '<div class="bar-group"><div class="bar-group-lbl">'+b.l+'</div>'+
+    [['Pipeline',b.s2,'var(--seq2)'],['Lab-Germline',b.s6,'var(--seq6)'],['Mouse-Opt',b.s0,'var(--seq0)'],['Lab Ref',b.s5,'var(--seq5)']].map(function(x){
+      var n=x[0],v=x[1],col=x[2];
+      return '<div class="bar-row"><span class="bar-lbl" style="color:'+col+'">'+n+'</span><div class="bar-track"><div class="bar-fill" style="width:'+(v!=null?(v*100).toFixed(1)+'%':'0%')+';background:'+col+'"></div></div><span class="bar-val" style="color:'+col+'">'+(v!=null?pct(v):'—')+'</span></div>';
+    }).join('')+'</div>';}).join('');
+  var tbody='';
+  for(var si=0;si<FSECS.length;si++){var sec=FSECS[si];
+    tbody+='<tr class="sec-row"><td colspan="9">'+sec.lbl+'</td></tr>';
+    for(var ri=0;ri<sec.rows.length;ri++){var r=sec.rows[ri];
+      var v2=r.get(d2),v5=r.get(d5),v6=r.get(d6);
+      var w=winner(v2,v6,r.h),sb=s5Beats(v2,v6,v5,r.h);
+      var d25=v2!=null&&v5!=null?v5-v2:null,d65=v6!=null&&v5!=null?v5-v6:null;
+      var isZ=!r.noZero&&(v2===0||v2==null)&&(v5===0||v5==null)&&(v6===0||v6==null);
+      var rCls=sb?' class="warn-row"':isZ?' class="zero-row"':'';
+      tbody+='<tr'+rCls+'><td style="font-family:var(--sans);font-size:.7rem">'+r.k+'</td>'+
+        '<td>'+(v2!=null?r.fmt(v2):'<span style="color:var(--t3)">—</span>')+'</td>'+
+        '<td>'+(v6!=null?r.fmt(v6):'<span style="color:var(--t3)">—</span>')+'</td>'+
+        '<td style="color:var(--t3)">'+(v5!=null?r.fmt(v5):'—')+'</td>'+
+        '<td>'+delt(d25,r.fmt===pct)+'</td><td>'+delt(d65,r.fmt===pct)+'</td>'+
+        '<td>'+(w?'<span class="badge '+(w==='seq2'?'b2':'b6')+'">'+w+'</span>':'<span style="color:var(--t3);font-size:.6rem">n/a</span>')+'</td>'+
+        '<td>'+(r.h!==null?(sb?'<span class="s5b">! yes</span>':'<span style="color:var(--t3);font-size:.6rem">no</span>'):'<span style="color:var(--t3)">—</span>')+'</td>'+
+        '<td style="font-family:var(--sans);font-size:.62rem;color:var(--t2);white-space:normal;line-height:1.4;max-width:180px">'+r.note+'</td></tr>';
+    }
+  }
+  document.getElementById('feat-tbody').innerHTML=tbody;
+}
+
+// ── Germline Identity ──
+function renderGermline(){
+  var c=curClone;
+  document.getElementById('germ-title').textContent=c+' — Germline Identity';
+  function buildGermTable(chain){
+    var ck=chain==='VH'?'g_vh':'g_vl',rk=chain==='VH'?'g_vh_ref':'g_vl_ref';
+    var h='<thead><tr><th>Seq</th><th>Label</th><th>Reference germline</th><th style="color:var(--seq2)">Identity</th></tr></thead><tbody>';
+    var defs=[['0','seq0 — Mouse-Optimized'],['2','seq2 — Pipeline Candidate'],['5','seq5 — Lab Reference'],['6','seq6 — Lab-Germline Candidate']];
+    for(var i=0;i<defs.length;i++){
+      var sid=defs[i][0],label=defs[i][1],d=DATA[c][sid],val=d[ck],ref=d[rk];
+      var col=val==null?'var(--t3)':val>=0.95?'var(--green)':val>=0.85?'var(--amber)':'var(--red)';
+      h+='<tr><td style="font-weight:600">'+sid+'</td><td style="font-family:var(--sans);font-size:.7rem;color:var(--t2)">'+label+'</td><td style="font-family:var(--mono);font-size:.7rem">'+(ref||'—')+'</td><td style="font-weight:600;color:'+col+'">'+(val!=null?pct(val):'—')+'</td></tr>';
+    }
+    return h+'</tbody>';
+  }
+  document.getElementById('germ-vh-table').innerHTML=buildGermTable('VH');
+  document.getElementById('germ-vl-table').innerHTML=buildGermTable('VL');
+  var l2=RPT[c].l2;
+  document.getElementById('germ-selection').innerHTML='<table class="gtable"><thead><tr><th>Chain</th><th>Pipeline germline</th><th>Lab germline</th><th>Same family?</th><th>FR identity seq1 vs seq3</th><th>Vernier mutable &Delta;</th></tr></thead><tbody>'+
+    '<tr><td style="font-weight:600">VH</td><td style="color:var(--blue)">'+(l2.pg||'—')+'</td><td style="color:var(--teal)">'+(l2.lg||'—')+'</td><td>'+(l2.fam!=null?(l2.fam?'<span style="color:var(--green)">Yes</span>':'<span style="color:var(--amber)">No</span>'):'—')+'</td><td style="color:'+(l2.fri>=0.92?'var(--green)':l2.fri>=0.80?'var(--amber)':'var(--red)')+'">'+(l2.fri!=null?pct(l2.fri):'—')+'</td><td style="color:'+(l2.vd===0?'var(--green)':'var(--amber)')+'">'+(l2.vd!=null?(l2.vd>=0?'+':'')+l2.vd:'—')+'</td></tr>'+
+    '<tr><td style="font-weight:600">VL</td><td style="color:var(--blue)">'+(l2.vl_pg||'—')+'</td><td style="color:var(--teal)">'+(l2.vl_lg||'—')+'</td><td>'+(l2.vl_fam!=null?(l2.vl_fam?'<span style="color:var(--green)">Yes</span>':'<span style="color:var(--amber)">No</span>'):'—')+'</td><td style="color:'+(l2.vl_fri>=0.92?'var(--green)':l2.vl_fri>=0.80?'var(--amber)':'var(--red)')+'">'+(l2.vl_fri!=null?pct(l2.vl_fri):'—')+'</td><td style="color:'+(l2.vl_vd===0?'var(--green)':'var(--amber)')+'">'+(l2.vl_vd!=null?(l2.vl_vd>=0?'+':'')+l2.vl_vd:'—')+'</td></tr>'+
+    '</tbody></table>';
+  renderFRComparison();
+}
+
+// ── FR Comparison Viewer ──
+function renderFRComparison(){
+  var c=curClone;
+  var IMGT={FR1:[1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26],CDR1:[27,28,29,30,31,32,33,34,35,36,37,38],FR2:[39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55],CDR2:[56,57,58,59,60,61,62,63,64,65],FR3:[66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104],CDR3:[105,106,107,108,109,110,111,112,113,114,115,116,117],FR4:[118,119,120,121,122,123,124,125,126,127,128]};
+  var FR_REGIONS=['FR1','FR2','FR3','FR4'];
+  var ALL_REGIONS=['FR1','CDR1','FR2','CDR2','FR3','CDR3','FR4'];
+  var VERNIER_VH=new Set([2,27,29,30,47,48,67,69,71,78,80,93,94]);
+  var VERNIER_VL=new Set([2,4,35,36,46,47,48,49,64,66,68,69,71]);
+  var SEQS=[{sid:'2',label:'Pipeline',col:'var(--seq2)'},{sid:'6',label:'Lab-Germline',col:'var(--seq6)'},{sid:'5',label:'Lab Ref',col:'var(--seq5)'},{sid:'0',label:'Mouse-Opt',col:'var(--seq0)'}];
+  var GERM_SRC={'2':'germ_pipe','6':'germ_lab','5':'germ_stated','0':null};
+  function getAA(pp,p){return pp&&pp[String(p)]?pp[String(p)].aa:'-';}
+
+  // Panel 1: each seq vs its reference germline (FR only)
+  function buildPanel1(chain){
+    var ppKey=chain==='VH'?'vh_pp':'vl_pp';
+    var vset=chain==='VH'?VERNIER_VH:VERNIER_VL;
+    var refKey=chain==='VH'?'g_vh_ref':'g_vl_ref';
+    var idKey=chain==='VH'?'g_vh':'g_vl';
+    var germChainKey=chain==='VH'?'vh':'vl';
+    var h='';
+    for(var si=0;si<SEQS.length;si++){
+      var seq=SEQS[si],sid=seq.sid,label=seq.label,col=seq.col;
+      var d=DATA[c][sid],pp=d[ppKey]||{},ref=d[refKey]||'—',id=d[idKey];
+      var idFmt=id!=null?(id*100).toFixed(1)+'%':'—';
+      var idCol=id==null?'var(--t3)':id>=0.95?'var(--green)':id>=0.85?'var(--amber)':'var(--red)';
+      var gsrc=GERM_SRC[sid];
+      var gd=gsrc?DATA[c][gsrc]:null;
+      var gpp=gd?(gd[germChainKey]||null):null;
+      // Drift info for seq2/seq6
+      var driftHtml='';
+      if((sid==='2'||sid==='6')&&DRIFT&&DRIFT[c]&&DRIFT[c][sid]){
+        var dr=DRIFT[c][sid];
+        function fmtD(d){return d!=null?(d>=0?'+':'')+d.toFixed(3):'—';}
+        function dRow(lbl,post,delta,drifted){
+          var dc=drifted==='True'?'var(--red)':'var(--t3)';
+          var warn=drifted==='True'?' !':'';
+          return '<span style="color:var(--t3)">'+lbl+'</span>'+'<span style="color:'+dc+'">'+(post||'—')+'</span> <span style="color:'+dc+'">&Delta;='+fmtD(delta)+warn+'</span>';
+        }
+        driftHtml='<div style="font-size:.58rem;font-family:var(--mono);color:var(--t3);margin-top:.15rem;line-height:1.7"><div>'+dRow('VH post-Sapiens ',dr.vh_post,dr.vh_delta,dr.vh_drifted)+'</div><div>'+dRow('VL post-Sapiens ',dr.vl_post,dr.vl_delta,dr.vl_drifted)+'</div></div>';
+      }
+      var slotW=11;
+      h+='<div style="margin-bottom:.9rem;padding:.5rem .65rem;background:var(--s2);border-radius:5px;border:1px solid var(--bd)"><div style="display:flex;align-items:baseline;gap:.75rem;margin-bottom:.4rem;flex-wrap:wrap"><span style="font-size:.68rem;font-weight:600;color:'+col+';font-family:var(--mono)">'+label+'</span><span style="font-size:.6rem;color:var(--t3);font-family:var(--mono)">vs '+ref+'</span><span style="font-size:.62rem;color:'+idCol+';font-family:var(--mono)">FR identity: '+idFmt+'</span></div>'+driftHtml;
+      for(var fi=0;fi<FR_REGIONS.length;fi++){
+        var fr=FR_REGIONS[fi],positions=IMGT[fr];
+        var rulerRow='',seqRow='',germRow='',diffRow='',hasDiff=false;
+        for(var pi=0;pi<positions.length;pi++){
+          var p=positions[pi],sa=getAA(pp,p),ga=gpp?getAA(gpp,p):null;
+          var isV=vset.has(p),isDiff=ga&&sa!=='-'&&ga!=='-'&&sa!==ga;
+          if(isDiff)hasDiff=true;
+          var vBg=isV?'background:rgba(155,127,232,.15);outline:1px solid var(--cdr-bd);border-radius:2px;':'';
+          var sCol=isDiff?col:'var(--t2)';
+          var gCol=isDiff?'var(--amber)':'var(--t3)';
+          var slot='display:inline-block;width:'+slotW+'px;text-align:center;font-size:.65rem;';
+          var isTick=(p%10===0)||pi===0;
+          var rSlot='display:inline-block;width:'+slotW+'px;text-align:center;font-size:.5rem;line-height:1;color:'+(isTick?'var(--t2)':'transparent')+';'+(isTick?'border-bottom:1px solid var(--bd);':'');
+          rulerRow+='<span style="'+rSlot+'">'+(isTick?p:'')+'</span>';
+          seqRow+='<span style="'+slot+'color:'+sCol+';font-weight:'+(isDiff?700:400)+';'+vBg+'">'+sa+'</span>';
+          germRow+=ga?'<span style="'+slot+'color:'+gCol+'">'+ga+'</span>':'<span style="'+slot+'color:var(--t3)">-</span>';
+          diffRow+=isDiff?'<span style="'+slot+'color:var(--amber)">^</span>':'<span style="'+slot+'color:transparent">.</span>';
+        }
+        var lblW='width:72px;flex-shrink:0;font-size:.6rem;text-align:right;padding-right:6px;font-family:var(--sans);';
+        h+='<div style="margin-bottom:5px"><div style="font-size:.58rem;color:var(--t3);font-family:var(--mono);margin-bottom:1px;letter-spacing:.04em">'+fr+':</div>';
+        h+='<div style="display:flex;align-items:baseline;margin-bottom:2px"><span style="'+lblW+'color:var(--t3);font-size:.55rem">IMGT</span><span style="font-family:var(--mono);line-height:1">'+rulerRow+'</span></div>';
+        h+='<div style="display:flex;align-items:baseline;margin-bottom:1px"><span style="'+lblW+'color:'+col+'">'+label+'</span><span style="font-family:var(--mono);line-height:1.7">'+seqRow+'</span></div>';
+        if(gpp){
+          h+='<div style="display:flex;align-items:baseline;margin-bottom:1px"><span style="'+lblW+'color:var(--t3)">'+(ref?ref.split('*')[0]:'germ')+'</span><span style="font-family:var(--mono);line-height:1.7;opacity:.7">'+germRow+'</span></div>';
+          h+='<div style="display:flex;align-items:baseline"><span style="'+lblW+'color:var(--t3)">Diff</span><span style="font-family:var(--mono);line-height:1.7">'+(hasDiff?diffRow:'<span style="color:var(--t3);font-size:.6rem;font-family:var(--sans);font-style:italic">identical</span>')+'</span></div>';
+        }
+        h+='</div>';
+      }
+      h+='</div>';
+    }
+    return h;
+  }
+
+  // Panel 2: all 4 seqs aligned (FR+CDR, diffs vs seq5)
+  function buildPanel2(chain){
+    var ppKey=chain==='VH'?'vh_pp':'vl_pp';
+    var vset=chain==='VH'?VERNIER_VH:VERNIER_VL;
+    var seqData={};
+    for(var i=0;i<SEQS.length;i++)seqData[SEQS[i].sid]=DATA[c][SEQS[i].sid][ppKey]||{};
+    var ref5=seqData['5'];
+    var h='';
+    for(var ri=0;ri<ALL_REGIONS.length;ri++){
+      var region=ALL_REGIONS[ri],isCDR=region.startsWith('CDR'),positions=IMGT[region];
+      if(!positions||!positions.length)continue;
+      var hasData=false;
+      for(var si=0;si<SEQS.length&&!hasData;si++)for(var pi=0;pi<positions.length&&!hasData;pi++)if(seqData[SEQS[si].sid][String(positions[pi])])hasData=true;
+      if(!hasData)continue;
+      var diffPositions=[];
+      h+='<div style="margin-bottom:.45rem;'+(isCDR?'background:var(--cdr-bg);border:1px solid var(--cdr-bd);border-radius:4px;padding:.35rem .5rem':'')+'">';
+      h+='<div style="font-size:.58rem;color:'+(isCDR?'var(--purple)':'var(--t3)')+';font-family:var(--mono);margin-bottom:3px;letter-spacing:.06em">'+region+' <span style="font-weight:400;color:var(--t3)">('+positions.length+' pos)</span></div>';
+      for(var si=0;si<SEQS.length;si++){
+        var seq=SEQS[si],pp=seqData[seq.sid],rowHtml='';
+        for(var pi=0;pi<positions.length;pi++){
+          var p=positions[pi],aa=getAA(pp,p),raa=getAA(ref5,p);
+          var isDiff=seq.sid!=='5'&&aa!=='-'&&raa!=='-'&&aa!==raa;
+          var isV=vset.has(p);
+          var fc=isDiff?seq.col:isV?'var(--purple)':'var(--t2)';
+          var fw=isDiff?'700':'400';
+          rowHtml+='<span style="display:inline-block;width:8px;text-align:center;color:'+fc+';font-weight:'+fw+'">'+aa+'</span>';
+          if(seq.sid!=='5'&&isDiff){
+            var ex=null;for(var di=0;di<diffPositions.length;di++)if(diffPositions[di].p===p){ex=diffPositions[di];break;}
+            if(ex)ex.seqs.push(seq.label);else diffPositions.push({p:p,seqs:[seq.label]});
+          }
+        }
+        h+='<div style="display:flex;align-items:baseline;gap:.3rem;margin-bottom:1px;line-height:1.6"><span style="width:52px;flex-shrink:0;font-size:.58rem;color:'+seq.col+';font-family:var(--mono);text-align:right;padding-right:4px">'+seq.label+'</span><span style="font-family:var(--mono);font-size:.63rem">'+rowHtml+'</span></div>';
+      }
+      if(diffPositions.length){
+        h+='<div style="font-size:.55rem;color:var(--t3);font-family:var(--mono);margin-top:3px;padding-left:56px;line-height:1.4">&Delta; vs seq5: '+diffPositions.map(function(d){return '<span style="color:var(--amber)">pos'+d.p+'</span>('+d.seqs.join(',')+')';}).join('  ')+'</div>';
+      }
+      h+='</div>';
+    }
+    return h;
+  }
+
+  var p1vh=buildPanel1('VH'),p1vl=buildPanel1('VL');
+  var p2vh=buildPanel2('VH'),p2vl=buildPanel2('VL');
+  document.getElementById('germ-fr-comp').innerHTML=
+    '<div style="margin-bottom:1.25rem"><div style="font-size:.72rem;font-weight:600;color:var(--t1);margin-bottom:.65rem;padding-bottom:.4rem;border-bottom:1px solid var(--bd)">Panel 1 — Each sequence vs its reference germline (FR only)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start"><div><div style="font-size:.68rem;font-weight:600;color:var(--blue);margin-bottom:.5rem;font-family:var(--mono)">VH</div>'+p1vh+'</div><div><div style="font-size:.68rem;font-weight:600;color:var(--blue);margin-bottom:.5rem;font-family:var(--mono)">VL</div>'+p1vl+'</div></div></div>'+
+    '<div><div style="font-size:.72rem;font-weight:600;color:var(--t1);margin-bottom:.65rem;padding-bottom:.4rem;border-bottom:1px solid var(--bd)">Panel 2 — All 4 sequences aligned (FR + CDR &middot; diffs vs seq5 highlighted)</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start"><div><div style="font-size:.68rem;font-weight:600;color:var(--blue);margin-bottom:.5rem;font-family:var(--mono)">VH</div>'+p2vh+'</div><div><div style="font-size:.68rem;font-weight:600;color:var(--blue);margin-bottom:.5rem;font-family:var(--mono)">VL</div>'+p2vl+'</div></div></div>';
+}
+
+// ── Funnel ──
+function renderFunnel(){
+  var c=curClone,r=RPT[c];
+  document.getElementById('fun-title').textContent=c+' — Levels 0-4';
+  function kv(l,v,cls){cls=cls||'neu';return '<div class="kv"><div class="kv-lbl">'+l+'</div><div class="kv-val '+cls+'">'+(v!=null?v:'—')+'</div></div>';}
+  function pctKV(l,v,tg,tw){tg=tg||0.85;tw=tw||0.75;return kv(l,v!=null?pct(v):null,v==null?'neu':v>=tg?'good':v>=tw?'warn':'bad');}
+  var l0=r.l0,l1=r.l1,l2=r.l2,l3=r.l3,l4=r.l4;
+  document.getElementById('funnel-body').innerHTML=
+    '<div class="level-card"><div class="level-hdr"><span class="level-tag">Level 0</span><span class="level-title">Baseline Difficulty</span></div><div class="kv-grid">'+kv('Lab VH germline',l0.vh_germ||'—')+kv('Lab VL germline',l0.vl_germ||'—')+pctKV('FR identity VH',l0.vh_fr)+pctKV('FR identity VL',l0.vl_fr)+kv('Vernier mutable VH',l0.vh_vm!=null?String(l0.vh_vm):null,l0.vh_vm<=2?'good':l0.vh_vm<=4?'warn':'bad')+kv('Vernier mutable VL',l0.vl_vm!=null?String(l0.vl_vm):null,l0.vl_vm<=2?'good':l0.vl_vm<=4?'warn':'bad')+kv('CDR-H3 length',l0.vh_cdr3!=null?String(l0.vh_cdr3):null)+kv('CDR-L3 length',l0.vl_cdr3!=null?String(l0.vl_cdr3):null)+kv('Back-mutations seq3-seq5',l0.bm!=null?String(l0.bm):null,l0.bm===0?'good':l0.bm<=3?'warn':'bad')+'</div></div>'+
+    '<div class="level-card"><div class="level-hdr"><span class="level-tag">Level 1</span><span class="level-title">seq0 — Sapiens on Mouse</span></div><div class="kv-grid">'+pctKV('OASis VH',l1.vh_oa)+pctKV('OASis VL',l1.vl_oa)+kv('&Delta; OASis VH vs seq5',l1.oa_d!=null?(l1.oa_d>=0?'+':'')+pct(l1.oa_d):null,l1.oa_d>0?'good':l1.oa_d>-0.05?'warn':'bad')+pctKV('Identity vs seq5 VH',l1.id5,0.9,0.8)+kv('FR positions changed',l1.frc!=null?String(l1.frc):null)+kv('Vernier changed',l1.vc!=null?String(l1.vc):null,l1.vc===0?'good':'warn')+'</div></div>'+
+    '<div class="level-card"><div class="level-hdr"><span class="level-tag">Level 2</span><span class="level-title">seq2 — Pipeline Germline + Sapiens</span></div><div class="kv-grid">'+pctKV('OASis VH',l2.vh_oa)+pctKV('OASis VL',l2.vl_oa)+kv('&Delta; OASis VH vs seq5',l2.oa_d!=null?(l2.oa_d>=0?'+':'')+pct(l2.oa_d):null,l2.oa_d>0?'good':l2.oa_d>-0.05?'warn':'bad')+pctKV('Identity vs seq5 VH',l2.id5,0.9,0.8)+kv('Pipeline VH germline',l2.pg||'—')+kv('Lab VH germline',l2.lg||'—')+kv('Same family?',l2.fam!=null?(l2.fam?'Yes':'No'):null,l2.fam?'good':'warn')+pctKV('FR identity seq1 vs seq3',l2.fri,0.9,0.8)+kv('Vernier mutable &Delta;',l2.vd!=null?(l2.vd>=0?'+':'')+l2.vd:null,l2.vd===0?'good':'warn')+'</div></div>'+
+    '<div class="level-card"><div class="level-hdr"><span class="level-tag">Level 3</span><span class="level-title">seq6 — Lab Germline + Sapiens</span></div><div class="kv-grid">'+pctKV('OASis VH',l3.vh_oa)+pctKV('OASis VL',l3.vl_oa)+kv('&Delta; OASis VH vs seq5',l3.oa_d!=null?(l3.oa_d>=0?'+':'')+pct(l3.oa_d):null,l3.oa_d>0?'good':l3.oa_d>-0.05?'warn':'bad')+pctKV('Identity vs seq5 VH',l3.id5,0.9,0.8)+kv('VH conflicts up',l3.vh_oh!=null?String(l3.vh_oh):null,l3.vh_oh===0?'good':l3.vh_oh<=3?'warn':'bad')+kv('VH conflicts dn',l3.vh_oc!=null?String(l3.vh_oc):null,l3.vh_oc===0?'good':'warn')+kv('VL conflicts up',l3.vl_oh!=null?String(l3.vl_oh):null,l3.vl_oh===0?'good':l3.vl_oh<=3?'warn':'bad')+kv('VL conflicts dn',l3.vl_oc!=null?String(l3.vl_oc):null,l3.vl_oc===0?'good':'warn')+kv('VH agreements',l3.vh_agree!=null?String(l3.vh_agree):null)+kv('VL agreements',l3.vl_agree!=null?String(l3.vl_agree):null)+kv('Gap A (seq0-seq2)',r.gaps.gA!=null?(r.gaps.gA>=0?'+':'')+pct(r.gaps.gA):null)+kv('Gap B (seq2-seq6)',r.gaps.gB!=null?(r.gaps.gB>=0?'+':'')+pct(r.gaps.gB):null)+'</div></div>'+
+    '<div class="level-card"><div class="level-hdr"><span class="level-tag">Level 4</span><span class="level-title">seq7 — Mechanical Validation</span></div><div class="kv-grid">'+pctKV('VH identity seq7 vs seq5',l4.vi,0.97,0.92)+pctKV('VL identity seq7 vs seq5',l4.li,0.97,0.92)+kv('VH discrepancies',l4.vd!=null?String(l4.vd):null,l4.vd===0?'good':l4.vd<=1?'warn':'bad')+kv('VL discrepancies',l4.ld!=null?String(l4.ld):null,l4.ld===0?'good':l4.ld<=1?'warn':'bad')+'</div></div>';
+}
+
+// ── Sequences ──
+function renderSequences(){
+  document.getElementById('seq-title').textContent=curClone+' — VH & VL';
+  renderChainSeq('vh');renderChainSeq('vl');
+}
+function renderChainSeq(chain){
+  var c=curClone,d2=DATA[c]['2'],d5=DATA[c]['5'],d6=DATA[c]['6'];
+  var seq2=d2[chain],seq5=d5[chain],seq6=d6[chain];
+  var reg2=d2[chain+'_r'],reg5=d5[chain+'_r'],reg6=d6[chain+'_r'];
+  if(!seq5){document.getElementById('seq-'+chain).innerHTML='<span style="color:var(--t3)">No sequence</span>';return;}
+  var len=seq5.length,c2=seq2?seq2.split(''):[],c5=seq5.split(''),c6=seq6?seq6.split(''):[];
+
+  // Build linear→IMGT map for seq5 using its per-position OASis detail
+  // (abnumber-based — same numbering the Germline Identity tab uses, so the
+  // two rulers agree column-for-column with their respective cells).
+  var ppKey=chain==='vh'?'vh_pp':'vl_pp';
+  var pp=d5[ppKey]||{};
+  var imgtSorted=Object.keys(pp).map(Number).filter(function(n){return !isNaN(n);}).sort(function(a,b){return a-b;});
+  // pp may skip ends → pad with sequential linear when no IMGT is known
+  var linearToImgt=new Array(len);
+  for(var i=0;i<len;i++)linearToImgt[i]=(i<imgtSorted.length?imgtSorted[i]:null);
+
+  var ruler='<div class="seq-ruler-row">';
+  for(var p=0;p<len;p++){
+    var pos=linearToImgt[p];
+    var isTick=pos!=null&&((pos%10===0)||p===0);
+    ruler+='<span class="ruler-aa'+(isTick?' tick':'')+'">'+(isTick?pos:'')+'</span>';
+  }
+  ruler+='</div>';
+  function buildLine(chars,ref,name,col,regions){
+    var h='<div class="seq-line"><span class="seq-name" style="color:'+col+'">'+name+'</span>';
+    if(regions&&regions.length){
+      for(var ri=0;ri<regions.length;ri++){var reg=regions[ri];
+        h+='<span class="region-block '+(reg.t==='FR'?'FR':reg.t)+'">';
+        for(var p=reg.start;p<reg.end&&p<len;p++){
+          var aa=chars[p]||'.',ra=ref[p]||'.',diff=aa!==ra&&aa!=='.';
+          var other=col.indexOf('blue')>=0?c6[p]:c2[p];
+          var cls='match';
+          if(diff){var od=other&&other!==ra&&other!=='.';cls=od?'diff-both':(col.indexOf('blue')>=0?'diff2':'diff6');}
+          h+='<span class="aa '+cls+'">'+aa+'</span>';
+        }
+        h+='</span>';
+      }
+    } else for(var p=0;p<len;p++){
+      var aa=chars[p]||'.',ra=ref[p]||'.',diff=aa!==ra&&aa!=='.';
+      var other=col.indexOf('blue')>=0?c6[p]:c2[p];
+      var cls='match';
+      if(diff){var od=other&&other!==ra&&other!=='.';cls=od?'diff-both':(col.indexOf('blue')>=0?'diff2':'diff6');}
+      h+='<span class="aa '+cls+'">'+aa+'</span>';
+    }
+    return h+'</div>';
+  }
+  function buildRef(){
+    var h='<div class="seq-line"><span class="seq-name" style="color:var(--seq5)">seq5 ref</span>';
+    if(reg5&&reg5.length){for(var ri=0;ri<reg5.length;ri++){var reg=reg5[ri];h+='<span class="region-block '+(reg.t==='FR'?'FR':reg.t)+'">';for(var p=reg.start;p<reg.end;p++)h+='<span class="aa match">'+(c5[p]||'.')+'</span>';h+='</span>';}}
+    else c5.forEach(function(aa){h+='<span class="aa match">'+aa+'</span>';});
+    return h+'</div>';
+  }
+  document.getElementById('seq-'+chain).innerHTML='<div class="seq-wrap"><div class="seq-block">'+ruler+buildLine(c2,c5,'seq2','var(--blue)',reg2)+buildRef()+buildLine(c6,c5,'seq6','var(--teal)',reg6)+'</div></div>';
+}
+
+// ── Mutable Positions (Vernier + Non-Vernier) ──
+function renderVernier(){
+  document.getElementById('vern-title').textContent=curClone+' — Mutable Positions';
+  renderChainVernier('VH','vern-vh');
+  renderChainVernier('VL','vern-vl');
+  renderMutableNonVernier('VH','mut-vh-non');
+  renderMutableNonVernier('VL','mut-vl-non');
+  renderMutableNotes();
+}
+function aaFmt(v,t){
+  if(t==='sapiens_kept_mouse')return '<span class="ai">'+v+'*</span>';
+  if(t==='not_mutable')return '<span class="an">'+v+'&deg;</span>';
+  if(t==='back_mutated')return '<span class="am">'+v+'</span>';
+  if(t==='humanized'||t==='humanized_by_sapiens')return '<span class="ah">'+v+'</span>';
+  if(t==='other_substitution')return '<span class="ao">'+v+'</span>';
+  if(t==='sapiens_changed_non_mutable')return '<span class="ao">'+v+'!</span>';
+  return v;
+}
+function renderChainVernier(chain,elId){
+  var mut=MUTABLE&&MUTABLE[curClone]&&MUTABLE[curClone][chain];
+  var rows=mut?mut.vern:VERN[curClone][chain];
+  if(!rows||!rows.length){document.getElementById(elId).innerHTML='<span style="color:var(--t3)">No mutable Vernier positions.</span>';return;}
+  var ppKey=chain==='VH'?'vh_pp':'vl_pp';
+  function getAA(sid,pos){var pp=DATA[curClone][sid]&&DATA[curClone][sid][ppKey];return(pp&&pp[String(pos)])?pp[String(pos)].aa:null;}
+  var h='<table class="vtable"><thead><tr><th>Pos</th><th style="color:var(--green)">Mouse</th><th style="color:var(--seq2)">SEQ2</th><th style="color:var(--seq6)">SEQ6</th><th style="color:var(--seq5)">SEQ5 REF</th></tr></thead><tbody>';
+  for(var i=0;i<rows.length;i++){var r=rows[i];
+    var s2=getAA('2',r.pos)||r.s2,s5=getAA('5',r.pos)||r.s5,s6=getAA('6',r.pos)||r.s6;
+    var mouse=(r.mouse&&r.mouse!=='?')?r.mouse:(getAA('0',r.pos)||'?');
+    var conflict=(r.s5_t==='back_mutated')&&(r.s2_t==='humanized'||r.s6_t==='humanized');
+    h+='<tr'+(conflict?' class="conflict-row"':'')+'><td style="font-weight:600">'+r.pos+'</td><td><span class="am">'+mouse+'</span></td><td>'+aaFmt(s2,r.s2_t)+'</td><td>'+aaFmt(s6,r.s6_t)+'</td><td>'+aaFmt(s5,r.s5_t)+'</td></tr>';
+  }
+  document.getElementById(elId).innerHTML=h+'</tbody></table>';
+}
+function renderMutableNonVernier(chain,elId){
+  var mut=MUTABLE&&MUTABLE[curClone]&&MUTABLE[curClone][chain];
+  var rows=mut?mut.non:[];
+  if(!rows||!rows.length){document.getElementById(elId).innerHTML='<span style="color:var(--t3);font-size:.8rem">No non-Vernier mutable positions.</span>';return;}
+  var ppKey=chain==='VH'?'vh_pp':'vl_pp';
+  function getAA(sid,pos){var pp=DATA[curClone][sid]&&DATA[curClone][sid][ppKey];return(pp&&pp[String(pos)])?pp[String(pos)].aa:null;}
+  var h='<table class="vtable"><thead><tr><th>Pos</th><th style="color:var(--green)">Mouse</th><th style="color:var(--seq2)">SEQ2</th><th style="color:var(--seq6)">SEQ6</th><th style="color:var(--seq5)">SEQ5 REF</th></tr></thead><tbody>';
+  for(var i=0;i<rows.length;i++){var r=rows[i];
+    var s2=getAA('2',r.pos)||r.s2,s5=getAA('5',r.pos)||r.s5,s6=getAA('6',r.pos)||r.s6;
+    var mouse=(r.mouse&&r.mouse!=='?')?r.mouse:(getAA('0',r.pos)||'?');
+    var conflict=(r.s5_t==='back_mutated')&&(r.s2_t==='humanized'||r.s6_t==='humanized');
+    h+='<tr'+(conflict?' class="conflict-row"':'')+'><td style="font-weight:600">'+r.pos+'</td><td><span class="am">'+mouse+'</span></td><td>'+aaFmt(s2,r.s2_t)+'</td><td>'+aaFmt(s6,r.s6_t)+'</td><td>'+aaFmt(s5,r.s5_t)+'</td></tr>';
+  }
+  document.getElementById(elId).innerHTML=h+'</tbody></table>';
+}
+
+function renderMutableNotes(){
+  var c=curClone;
+  var allNotes=[];
+  function collectNotes(chain,rows,blockLabel){
+    if(!rows)return;
+    for(var i=0;i<rows.length;i++){var r=rows[i];
+      var notes=[];
+      if(r.s5_t==='back_mutated'&&(r.s2_t==='humanized'||r.s2_t==='humanized_by_sapiens'))notes.push({t:'seq2 humanized; lab back-mutated',c:'note-c'});
+      if(r.s5_t==='back_mutated'&&(r.s6_t==='humanized'||r.s6_t==='humanized_by_sapiens'))notes.push({t:'seq6 humanized; lab back-mutated',c:'note-c'});
+      if(r.s2!==r.s6&&r.s2_t!=='not_mutable'&&r.s6_t!=='not_mutable')notes.push({t:'seq2('+r.s2+') != seq6('+r.s6+') germline effect',c:'note-w'});
+      if(r.s2_t==='not_mutable'&&r.s6_t!=='not_mutable')notes.push({t:'mutable for lab germline only',c:'note-w'});
+      if(r.s6_t==='not_mutable'&&r.s2_t!=='not_mutable')notes.push({t:'mutable for pipeline germline only',c:'note-w'});
+      if(r.s2_t==='other_substitution')notes.push({t:'seq2: third residue',c:'note-w'});
+      if(r.s6_t==='other_substitution')notes.push({t:'seq6: third residue',c:'note-w'});
+      if(r.s2_t==='sapiens_changed_non_mutable')notes.push({t:'seq2: Sapiens changed non-mutable',c:'note-w'});
+      if(r.s6_t==='sapiens_changed_non_mutable')notes.push({t:'seq6: Sapiens changed non-mutable',c:'note-w'});
+      if(notes.length)allNotes.push({chain:chain,block:blockLabel,pos:r.pos,notes:notes});
+    }
+  }
+  var mutVH=MUTABLE&&MUTABLE[c]&&MUTABLE[c].VH;
+  var mutVL=MUTABLE&&MUTABLE[c]&&MUTABLE[c].VL;
+  collectNotes('VH',mutVH?mutVH.vern:(VERN[c]&&VERN[c].VH),'Vernier');
+  collectNotes('VL',mutVL?mutVL.vern:(VERN[c]&&VERN[c].VL),'Vernier');
+  collectNotes('VH',mutVH?mutVH.non:[],'Non-Vernier');
+  collectNotes('VL',mutVL?mutVL.non:[],'Non-Vernier');
+  var el=document.getElementById('mut-notes');
+  if(!allNotes.length){el.style.display='none';return;}
+  el.style.display='';
+  var h='<table class="vtable"><thead><tr><th>Chain</th><th>Block</th><th>Pos</th><th>Note</th></tr></thead><tbody>';
+  for(var i=0;i<allNotes.length;i++){var n=allNotes[i];
+    h+='<tr><td style="font-weight:600">'+n.chain+'</td><td style="font-size:.7rem;color:var(--t2)">'+n.block+'</td><td style="font-weight:600">'+n.pos+'</td><td style="font-family:var(--sans);font-size:.78rem;line-height:1.5">'+n.notes.map(function(x){return '<span class="'+x.c+'">'+x.t+'</span>';}).join('<br>')+'</td></tr>';
+  }
+  document.getElementById('mut-notes-body').innerHTML=h+'</tbody></table>';
+}
+
+// ── Navigation ──
+function showSec(s){
+  curSec=s;
+  document.querySelectorAll('.section').forEach(function(el){el.style.display='none';});
+  var sec=document.getElementById(s);if(sec)sec.style.display='block';
+  document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active');});
+  var btn=document.querySelector('.nav-btn[onclick*="'+s+'"]');if(btn)btn.classList.add('active');
+  render();
+}
+function updateClone(){curClone=document.getElementById('cloneSelect').value;render();}
+function render(){
+  if(curSec==='features')renderFeatures();
+  else if(curSec==='germline')renderGermline();
+  else if(curSec==='sequences')renderSequences();
+  else if(curSec==='vernier')renderVernier();
+}
+render();
+</script>
+</body>
+</html>

@@ -31,12 +31,67 @@ sys.path.insert(0, "/workspace/antibody-humanization-tool")  # noqa: E402
 from abnumber import Chain
 from pipeline.step_b_germline_scoring import rank_germlines, normalize_germline_name, print_normalization_report
 from pipeline.step_a_numbering import number_sequence, IMGT_REGIONS
-from evaluation.evaluate import detect_germline
+from evaluation.evaluate import detect_germline, get_germline_fr_by_region
 from typing import Optional
 from dataclasses import dataclass, field
 import argparse
 import csv
+import json
 import re
+
+
+# ── Germline sequence retrieval ───────────────────────────────────────────────
+
+def get_germline_seq_by_region(germline_name: str, chain_type: str) -> dict:
+    """
+    Retrieve the germline sequence split by all regions (FR + CDR).
+    Wraps evaluate.py's get_germline_fr_by_region (which returns FR only)
+    and extends it with CDR regions using the same ANARCI lookup.
+
+    Returns {region: {str(imgt_pos): aa}} for FR1/CDR1/FR2/CDR2/FR3/CDR3/FR4.
+    Stored in all_sequences.csv so the report can render side-by-side
+    sequence vs germline comparisons without needing database access at render time.
+    """
+    try:
+        from anarci.germlines import all_germlines
+        human_germlines = all_germlines["V"][chain_type]["human"]
+
+        gene = germline_name.split("*")[0]
+        allele01 = f"{gene}*01"
+        matched_seq = None
+        if germline_name in human_germlines:
+            matched_seq = human_germlines[germline_name]
+        elif allele01 in human_germlines:
+            matched_seq = human_germlines[allele01]
+        else:
+            for name, aligned in human_germlines.items():
+                if name.split("*")[0] == gene:
+                    matched_seq = aligned
+                    break
+
+        if matched_seq is None:
+            return {}
+
+        # Parse aligned IMGT string into {pos: aa} — same as evaluate.py
+        all_residues = {
+            pos_idx + 1: aa
+            for pos_idx, aa in enumerate(matched_seq)
+            if aa != "-"
+        }
+
+        # Split into all regions using IMGT_REGIONS (same dict used in evaluate.py)
+        result = {}
+        for region, positions in IMGT_REGIONS.items():
+            region_res = {str(p): all_residues[p]
+                          for p in positions if p in all_residues}
+            if region_res:
+                result[region] = region_res
+        return result
+
+    except Exception as e:
+        print(
+            f"    Warning: could not retrieve germline sequence for {germline_name}: {e}")
+        return {}
 
 
 # ── Lab germline name parsing (same as evaluate.py) ──────────────────────────
@@ -116,6 +171,17 @@ class CloneSequences:
     vh_cdr_def_stated:     Optional[str] = None  # used for seqs 8, 9
     vl_cdr_def_stated:     Optional[str] = None
     error:                 Optional[str] = None
+
+    # Germline sequences by region — stored as {region: {imgt_pos: aa}} dicts
+    # Retrieved from ANARCI database at generation time using the same mechanism
+    # as evaluate.py so the report can render side-by-side comparisons without
+    # needing database access.
+    vh_germ_pipeline_seq:  Optional[dict] = None  # pipeline top-1 germline
+    vl_germ_pipeline_seq:  Optional[dict] = None
+    vh_germ_detected_seq:  Optional[dict] = None  # detected lab germline
+    vl_germ_detected_seq:  Optional[dict] = None
+    vh_germ_stated_seq:    Optional[dict] = None  # lab-stated germline
+    vl_germ_stated_seq:    Optional[dict] = None
 
 
 # ── CDR definition selection ─────────────────────────────────────────────────
@@ -433,6 +499,25 @@ def generate_sequences(
         if stated_vl_germ:
             print(f"    Lab-stated VL germline: {stated_vl_germ}")
 
+        # ── Store germline sequences from ANARCI database ────────────────────
+        print(f"    Retrieving germline sequences from database...")
+        result.vh_germ_pipeline_seq = get_germline_seq_by_region(
+            pipe_vh_germ, "H")
+        result.vl_germ_pipeline_seq = get_germline_seq_by_region(
+            pipe_vl_germ, vl_chain_type)
+        if det_vh_germ:
+            result.vh_germ_detected_seq = get_germline_seq_by_region(
+                det_vh_germ, "H")
+        if det_vl_germ:
+            result.vl_germ_detected_seq = get_germline_seq_by_region(
+                det_vl_germ, vl_chain_type)
+        if stated_vh_germ:
+            result.vh_germ_stated_seq = get_germline_seq_by_region(
+                stated_vh_germ, "H")
+        if stated_vl_germ:
+            result.vl_germ_stated_seq = get_germline_seq_by_region(
+                stated_vl_germ, vl_chain_type)
+
         # ── Sequence 0: Sapiens applied directly to mouse (no grafting) ─────
         # This is the pure model output — no human germline selection,
         # no CDR grafting. Sapiens predicts the most human-like residue
@@ -631,6 +716,17 @@ def export_sequences(all_seqs: list, output_path: str) -> None:
                 "vl_chain_type":      seqs.vl_chain_type or "",
                 "vh_cdr_def":         vh_cdr_def or "",
                 "vl_cdr_def":         vl_cdr_def or "",
+                # Germline sequences by region (JSON-serialised, clone-level attributes)
+                # Only populated for seq_ids where the germline is relevant:
+                #   pipeline: seqs 0,1,2
+                #   detected: seqs 3,4,5,6,7
+                #   stated:   seqs 8,9
+                "vh_germ_pipeline_seq": json.dumps(seqs.vh_germ_pipeline_seq or {}),
+                "vl_germ_pipeline_seq": json.dumps(seqs.vl_germ_pipeline_seq or {}),
+                "vh_germ_detected_seq": json.dumps(seqs.vh_germ_detected_seq or {}),
+                "vl_germ_detected_seq": json.dumps(seqs.vl_germ_detected_seq or {}),
+                "vh_germ_stated_seq":   json.dumps(seqs.vh_germ_stated_seq or {}),
+                "vl_germ_stated_seq":   json.dumps(seqs.vl_germ_stated_seq or {}),
             })
 
     if not rows:

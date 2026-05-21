@@ -11,3 +11,10 @@ outputs/*.tsv
 outputs/*.xlsx
 tests/*
 *.db
+
+# Bundles produced by bundle.sh (regenerable, can be ~25GB)
+humanization-advisor-*.tar.gz
+
+# Job outputs that change every run
+outputs/*.html
+outputs/jobs/

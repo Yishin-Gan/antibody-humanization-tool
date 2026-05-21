@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Humanization report — {{ job_id }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='report.css') }}?v=11">
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <div class="title">
+      <span class="emoji">🧬</span>
+      <span>Antibody Humanization Advisor</span>
+      <span class="job" id="job-label">job: {{ job_id }}</span>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/" title="New analysis">＋ New</a>
+      <button class="btn" id="dl-xlsx" title="Glossary + region-split sequences + all metrics">⤓ XLSX</button>
+      <button class="btn" id="dl-fasta">⤓ FASTA</button>
+      <button class="btn" id="dl-html">⤓ HTML</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="legend" id="legend"></div>
+      <nav class="nav">
+        <button class="nav-btn active" data-tab="summary">Summary</button>
+        <button class="nav-btn" data-tab="sequence">Sequence View</button>
+        <button class="nav-btn" data-tab="germline">Germline Identity</button>
+        <button class="nav-btn" data-tab="mutable">Mutable Positions</button>
+        <button class="nav-btn" data-tab="features">Feature Metrics</button>
+        <button class="nav-btn nav-tweak" data-tab="tweak">Tweak <span class="badge-count" id="tweak-count" hidden>0</span></button>
+      </nav>
+      <div class="tweak-panel">
+        <h4>Tweak mode</h4>
+        <button class="btn small" id="tweak-toggle">Enable editing</button>
+        <div id="tweak-controls" hidden>
+          <label class="sub">Mode</label>
+          <select id="tweak-mode"></select>
+          <div class="hint" id="tweak-status">Click a residue in <em>Sequence View</em> to edit.</div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="tab" data-tab="summary"  id="tab-summary"></div>
+      <div class="tab" data-tab="sequence" id="tab-sequence" hidden></div>
+      <div class="tab" data-tab="germline" id="tab-germline" hidden></div>
+      <div class="tab" data-tab="mutable"  id="tab-mutable"  hidden></div>
+      <div class="tab" data-tab="features" id="tab-features" hidden></div>
+      <div class="tab" data-tab="tweak"    id="tab-tweak"    hidden></div>
+    </main>
+  </div>
+
+  <div id="rescore-bar" class="rescore-bar" hidden>
+    <span id="rescore-summary">0 positions edited.</span>
+    <button class="btn primary" id="rescore-go">▶ Re-score</button>
+    <button class="btn" id="rescore-reset">Reset all edits</button>
+    <button class="btn" id="rescore-download">⤓ Tweaked FASTA</button>
+  </div>
+</div>
+
+<script>
+window.JOB_ID = {{ job_id|tojson }};
+window.PAYLOAD = {{ payload_json|safe }};
+</script>
+<script src="{{ url_for('static', filename='report.js') }}?v=11"></script>
+</body>
+</html>

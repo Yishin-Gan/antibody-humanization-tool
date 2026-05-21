@@ -1,0 +1,41 @@
+# Antibody Humanization Advisor — production compose
+#
+# Setup (one-time):
+#   1. Make sure OASis_9mers_v1.db lives at the host path below (~23 GB).
+#   2. Build and bring up:
+#        docker compose up -d --build
+#   3. Web UI now at http://<host-ip>:5000
+#
+# `restart: always` means it starts on boot once the Docker engine itself
+# is configured to start at boot (on Linux: it's the systemd default; on
+# Windows / Docker Desktop the engine must be configured to autostart, and
+# Docker Desktop should be installed under a long-lived service account).
+#
+# To upgrade:
+#   git pull
+#   docker compose up -d --build
+
+services:
+  humanization:
+    build: .
+    image: humanization-advisor:latest
+    container_name: humanization
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      # CHANGE THIS to the actual host path of the OASis DB.
+      - /workspace/antibody-humanization-tool/data/OASis_9mers_v1.db:/data/OASis_9mers_v1.db:ro
+      # Persist completed-job results so a container restart doesn't lose them.
+      - humanization_jobs:/app/outputs/jobs
+    environment:
+      - OASIS_DB_PATH=/data/OASis_9mers_v1.db
+      - PYTHONUNBUFFERED=1
+    # Resource hint (raise if the workstation has more)
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+
+volumes:
+  humanization_jobs:
