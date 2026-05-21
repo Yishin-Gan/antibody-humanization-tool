@@ -5,6 +5,8 @@ __pycache__/
 *.egg-info/
 .ipynb_checkpoints/
 data/benchmarks/*.csv
+# ...except the committed reference benchmark
+!data/benchmarks/humanization_benchmark.csv
 *.log
 outputs/*.csv
 outputs/*.tsv
@@ -18,3 +20,7 @@ humanization-advisor-*.tar.gz
 # Job outputs that change every run
 outputs/*.html
 outputs/jobs/
+
+# Reference example outputs, however, ARE tracked (committed snapshots)
+!outputs/examples/
+!outputs/examples/**
