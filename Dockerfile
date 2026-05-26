@@ -29,14 +29,15 @@ RUN useradd --create-home --shell /bin/bash app
 
 WORKDIR /app
 
-# Install Python deps first (better layer caching)
+# Install Python deps in two layers for better caching.
+# Layer 1: torch CPU-only — installed from the PyTorch CPU index so we don't
+# pull ~3 GB of CUDA libraries. Sapiens and ImmuneBuilder both depend on
+# torch but don't require a specific build.
+# Layer 2: everything else from requirements.txt.
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt \
- && pip install --no-cache-dir \
-      flask==2.3.3 \
-      openpyxl==3.1.5 \
-      gunicorn==21.2.0
+ && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir -r requirements.txt
 
 # Pre-cache Sapiens model weights so the first user request is fast.
 # (Sapiens pulls ~75 chunks from HuggingFace on first call. Doing it in the

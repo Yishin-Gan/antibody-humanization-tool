@@ -1,3 +1,42 @@
-anarci
-biophi
-# hmmer must be installed at OS level — see README
+# Python dependencies for the Antibody Humanization Advisor.
+#
+# Versions are pinned to a known-working combination captured from the
+# original maintainer's container (pip freeze, 2026-05). Bump only with
+# intent: antibody/structure libraries have historically had silent
+# compatibility issues between major versions.
+#
+# Note: hmmer must be installed at OS level — see the Dockerfile's
+# apt-get install, or for non-container installs see the README.
+
+# ── Antibody numbering ────────────────────────────────────────────────────────
+abnumber==0.4.4
+ANARCI==2026.2.13.2
+
+# ── Humanization model ────────────────────────────────────────────────────────
+sapiens==1.1.0
+
+# ── Humanness scoring (BioPhi/OASis) ──────────────────────────────────────────
+# BioPhi is not distributed on PyPI — install from the official Merck repo,
+# pinned to a specific commit for reproducibility.
+biophi @ git+https://github.com/Merck/BioPhi.git@bc59cd17b690a634553ac50a60840b9a89bd21b0
+
+# ── Structure prediction (ABodyBuilder2 via ImmuneBuilder) ────────────────────
+ImmuneBuilder==1.2
+OpenMM==8.5.1
+pdbfixer==1.12.0
+gemmi==0.7.5
+
+# ── Sequence I/O ──────────────────────────────────────────────────────────────
+biopython==1.87
+
+# ── Scientific stack ──────────────────────────────────────────────────────────
+numpy==1.26.4
+pandas==2.1.4
+scipy==1.16.1
+scikit-learn==1.7.1
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+Flask==2.3.3
+Werkzeug==2.3.8
+openpyxl==3.1.5
+gunicorn==21.2.0
