@@ -64,7 +64,7 @@ up. **No Python or scientific packages installed on your host machine.**
 5. Add bind-mounts for the source code so your edits are visible inside the container. Edit `docker-compose.yml` and add four lines under `volumes:`:
    ```yaml
        volumes:
-         - /workspace/antibody-humanization-tool/data/OASis_9mers_v1.db:/data/OASis_9mers_v1.db:ro
+         - ./data/OASis_9mers_v1.db:/data/OASis_9mers_v1.db:ro
          - humanization_jobs:/app/outputs/jobs
          # ↓ ADD THESE for live source editing
          - ./web:/app/web

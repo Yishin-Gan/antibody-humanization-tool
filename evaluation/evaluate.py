@@ -17,8 +17,9 @@ Usage (from project root):
 """
 
 # isort: skip_file
+import os
 import sys
-sys.path.insert(0, "/workspace/antibody-humanization-tool")  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # noqa: E402
 from abnumber import Chain
 from pipeline.step_b_germline_scoring import rank_germlines, normalize_germline_name
 from pipeline.step_a_numbering import number_sequence, IMGT_REGIONS, ALL_CDR_POSITIONS

@@ -11,10 +11,11 @@ import ast
 import contextlib
 import io
 import json
+import os
 import sys
 from typing import Optional
 
-sys.path.insert(0, "/workspace/antibody-humanization-tool")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pipeline.step_a_numbering import number_sequence
 
 from web.runner import RunResult

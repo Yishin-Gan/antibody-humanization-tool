@@ -315,10 +315,12 @@ def export_graft_results(
 
 # ── Smoke test ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import os
     import sys
-    sys.path.insert(0, "/home/claude")
-    from step_a_numbering import number_sequence
-    from step_b_germline_scoring import rank_germlines
+    _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, _PROJECT_ROOT)
+    from pipeline.step_a_numbering import number_sequence
+    from pipeline.step_b_germline_scoring import rank_germlines
 
     test_vh = (
         "EVQLVESGGGLVQPGGSLRLSCAASGFNIKDTYIHWVRQAPGKGLEWVARIYPTNGYTRYADSVKGRFT"
@@ -359,10 +361,11 @@ if __name__ == "__main__":
     # OASis scoring — will skip gracefully if DB not available
     # stringency options: 'loose', 'relaxed' (default), 'medium', 'strict'
     print("\nOASis scoring (will skip if DB not present):")
+    _OASIS_DB = os.environ.get("OASIS_DB_PATH", os.path.join(_PROJECT_ROOT, "data", "OASis_9mers_v1.db"))
     vh_results = score_oasis(
-        vh_results, oasis_db_path="/workspace/antibody-humanization-tool/data/OASis_9mers_v1.db", stringency="relaxed")
+        vh_results, oasis_db_path=_OASIS_DB, stringency="relaxed")
     vl_results = score_oasis(
-        vl_results, oasis_db_path="/workspace/antibody-humanization-tool/data/OASis_9mers_v1.db", stringency="relaxed")
+        vl_results, oasis_db_path=_OASIS_DB, stringency="relaxed")
 
     print()
     print_graft_results(vh_results, chain_label="VH")
@@ -371,5 +374,5 @@ if __name__ == "__main__":
 
     export_graft_results(
         vh_results, vl_results,
-        output_path="/workspace/antibody-humanization-tool/outputs/grafted_candidates.csv"
+        output_path=os.path.join(_PROJECT_ROOT, "outputs", "grafted_candidates.csv"),
     )

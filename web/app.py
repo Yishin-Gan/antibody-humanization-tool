@@ -18,10 +18,11 @@ GET  /api/report/<id>/html   Download a self-contained copy of the report
 from __future__ import annotations
 
 import json
+import os
 import sys
 from threading import Lock
 
-sys.path.insert(0, "/workspace/antibody-humanization-tool")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Flask, render_template, request, redirect, url_for, jsonify, abort, Response
 

@@ -161,9 +161,10 @@ def run_pipeline(
     Returns:
         List of ranked pair dicts (the full candidate matrix)
     """
+    import os
     import sys
-    sys.path.insert(0, "/home/claude")
-    from step_a_numbering import number_sequence
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from pipeline.step_a_numbering import number_sequence
 
     # Sub-step A: number both sequences
     print("Step A: Numbering sequences...")
@@ -210,6 +211,7 @@ def run_pipeline(
 
 # ── Smoke test ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import os
     test_vh = (
         "EVQLVESGGGLVQPGGSLRLSCAASGFNIKDTYIHWVRQAPGKGLEWVARIYPTNGYTRYADSVKGRFT"
         "ISADTSKNTAYLQMNSLRAEDTAVYYCSRWGGDGFYAMDYWGQGTLVTVSS"
@@ -226,7 +228,7 @@ if __name__ == "__main__":
         top_n_vh=5,
         top_n_vl=5,
         export_csv=True,
-        csv_path="/workspace/antibody-humanization-tool/outputs/candidates.csv",
+        csv_path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs", "candidates.csv"),
     )
 
     print()

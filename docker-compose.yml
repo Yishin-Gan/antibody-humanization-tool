@@ -24,8 +24,10 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      # CHANGE THIS to the actual host path of the OASis DB.
-      - /workspace/antibody-humanization-tool/data/OASis_9mers_v1.db:/data/OASis_9mers_v1.db:ro
+      # OASis DB is expected at ./data/OASis_9mers_v1.db relative to this
+      # compose file (install.sh puts it there). To use a DB stored
+      # elsewhere on the host, edit this path.
+      - ./data/OASis_9mers_v1.db:/data/OASis_9mers_v1.db:ro
       # Persist completed-job results so a container restart doesn't lose them.
       - humanization_jobs:/app/outputs/jobs
     environment:

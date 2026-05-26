@@ -36,8 +36,9 @@ Usage:
 """
 
 # isort: skip_file
+import os
 import sys
-sys.path.insert(0, "/workspace/antibody-humanization-tool")  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # noqa: E402
 from pipeline.step_a_numbering import number_sequence
 from typing import Optional
 import argparse
@@ -574,7 +575,12 @@ def compute_vernier(
 
 # ── OASis humanness ───────────────────────────────────────────────────────────
 
-OASIS_DB = "/workspace/antibody-humanization-tool/data/OASis_9mers_v1.db"
+# Honor OASIS_DB_PATH if set (the Docker container sets it to /data/...);
+# otherwise default to data/OASis_9mers_v1.db relative to the project root.
+OASIS_DB = os.environ.get(
+    "OASIS_DB_PATH",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "OASis_9mers_v1.db"),
+)
 OASIS_THRESHOLD = 0.10   # matches BioPhi CLI default: --min-percent-subjects 10
 
 

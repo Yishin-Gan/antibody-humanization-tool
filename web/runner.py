@@ -24,7 +24,7 @@ import ast
 from dataclasses import dataclass, field
 from typing import Optional
 
-sys.path.insert(0, "/workspace/antibody-humanization-tool")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.step_a_numbering import number_sequence
 from pipeline.step_b_germline_scoring import (
